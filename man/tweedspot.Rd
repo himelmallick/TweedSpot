@@ -16,7 +16,7 @@ tweedspot(
   bam_nthreads = 1L,
   smooth_k = NULL,
   padj_method = "BY",
-  BPPARAM = BiocParallel::SerialParam()
+  BPPARAM = BiocParallel::bpparam()
 )
 }
 \arguments{
@@ -46,7 +46,7 @@ tweedspot(
 
   \item{padj_method}{Multiple-testing correction method passed to \code{stats::p.adjust()}.}
 
-  \item{BPPARAM}{A \code{BiocParallel::BiocParallelParam} object controlling parallelization across genes.}
+  \item{BPPARAM}{A \code{BiocParallel::BiocParallelParam} object controlling parallelization across genes. Defaults to the currently registered BiocParallel backend.}
 }
 \value{
 The input \code{SpatialExperiment} with TweedSpot results added.

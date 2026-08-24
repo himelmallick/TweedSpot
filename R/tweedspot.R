@@ -43,7 +43,8 @@
 #' @param padj_method Multiple-testing correction passed to [stats::p.adjust()].
 #'   Default `"BY"`.
 #' @param BPPARAM A [BiocParallel::BiocParallelParam] object controlling
-#'   parallelization across genes. Default [BiocParallel::SerialParam()].
+#'   parallelization across genes. Default [BiocParallel::bpparam()], which
+#'   uses the currently registered BiocParallel backend.
 #'
 #' @return The input `SpatialExperiment` with results added. In agnostic mode the
 #'   per-gene p-value, adjusted p-value, and statistic are written to
@@ -76,7 +77,7 @@ tweedspot <- function(input,
                       bam_nthreads = 1L,
                       smooth_k = NULL,
                       padj_method = "BY",
-                      BPPARAM = BiocParallel::SerialParam()) {
+                      BPPARAM = BiocParallel::bpparam()) {
 
   # Restrict the p-value combination rule to the supported options.
   combine <- match.arg(combine)
