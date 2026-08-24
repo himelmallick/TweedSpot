@@ -2,24 +2,24 @@ Package: TweedSpot
 Title: Self-Adaptive Spatial Tweedie Models for Spatially Variable Gene Detection
 Version: 0.99.0
 Authors@R: c(
-    person("Himel", "Mallick", role = c("aut", "cre"),
-           email = "FIRST.LAST@cornell.edu",
+    person("Nalin", "Arora", role = c("aut", "cre"),
+           email = "naa4050@med.cornell.edu",
+           comment = c(affiliation = "Cornell University",
+                       ORCID = "0009-0009-1340-688X")),
+    person("Himel", "Mallick", role = "aut",
+           email = "him4004@med.cornell.edu",
            comment = c(affiliation = "Cornell University")),
-    person("FIRST", "LAST", role = "aut",
-           comment = "graduate student"),
-    person("FIRST", "LAST", role = "ctb",
-           comment = "undergraduate contributor"))
+    person("Vivian Jia-yin", "Myers", role = "aut",
+           email = "FIRST.LAST@cornell.edu",
+           comment = c(affiliation = "Cornell University")))
 Description: TweedSpot detects spatially variable genes (SVGs) in spatially
     resolved transcriptomics data using self-adaptive Tweedie generalized
     additive models with nonparametric spatial smoothing. The method models raw
     counts directly, avoiding the bias introduced by log-transformation, adapts a
     gene-specific Tweedie index parameter to the mean-variance relationship of
     each gene, and offers an optional two-part formulation to accommodate excess
-    zeros. Spatially variable gene detection can be performed in a manner that is
-    agnostic to cell type, or in a cell-type-specific manner using either
-    cell-type proportions (for spot-level data) or cell-type labels (for
-    single-cell-resolution data). Inputs and outputs use the SpatialExperiment
-    infrastructure for interoperability with the Bioconductor ecosystem.
+    zeros. Inputs and outputs use the SpatialExperiment infrastructure for
+    interoperability with the Bioconductor ecosystem.
 License: MIT + file LICENSE
 Encoding: UTF-8
 Depends:
@@ -28,15 +28,10 @@ Imports:
     mgcv,
     SpatialExperiment,
     SummarizedExperiment,
-    SingleCellExperiment,
-    S4Vectors,
     BiocParallel,
-    Matrix,
     methods,
     stats
 Suggests:
-    scran,
-    scuttle,
     STexampleData,
     testthat (>= 3.0.0),
     knitr,
@@ -54,5 +49,5 @@ URL: https://github.com/mallick-lab/TweedSpot
 BugReports: https://github.com/mallick-lab/TweedSpot/issues
 VignetteBuilder: knitr
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.3.1
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.0.0

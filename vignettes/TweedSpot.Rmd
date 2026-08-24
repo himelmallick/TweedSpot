@@ -1,0 +1,145 @@
+---
+title: "Getting Started with TweedSpot"
+author: "Nalin Arora"
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+vignette: >
+  %\VignetteIndexEntry{Getting Started with TweedSpot}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+# Overview
+
+TweedSpot detects spatially variable genes (SVGs) in spatial transcriptomics
+data using Tweedie generalized additive models (GAMs) with a spatial smooth.
+The package currently focuses on an agnostic SVG workflow built around the
+`SpatialExperiment` container.
+
+This vignette covers a standard workflow:
+
+1. load a `SpatialExperiment`
+2. prefilter low-information genes
+3. fit TweedSpot
+4. inspect gene-level results
+
+# Load packages
+
+```{r libraries}
+library(TweedSpot)
+library(SpatialExperiment)
+library(SummarizedExperiment)
+library(STexampleData)
+```
+
+# Load example data
+
+We use the `Visium_humanDLPFC()` example dataset from `STexampleData`. To keep
+the vignette lightweight, we restrict the analysis to in-tissue spots and a
+small subset of genes.
+
+```{r load-data}
+spe <- Visium_humanDLPFC()
+spe <- spe[, colData(spe)$in_tissue == 1]
+spe <- spe[seq_len(min(100, nrow(spe))), ]
+
+spe
+```
+
+# Prefilter genes
+
+`filter_genes()` removes genes with limited information before model fitting.
+In addition to minimum total counts and percent of nonzero spots, it can also
+filter on the number of nonzero spots, mean counts, variance, and optionally
+exclude mitochondrial or ribosomal genes.
+
+```{r filter-genes}
+spe <- filter_genes(
+  input = spe,
+  assay_name = "counts",
+  filter_genes_ncounts = 5,
+  filter_genes_pcspots = 5,
+  filter_genes_nspots = 3,
+  filter_genes_mean = 0.05
+)
+
+spe
+```
+
+# Fit TweedSpot
+
+We now fit TweedSpot on the filtered dataset. Here we adjust for `sample_name`
+from `colData(spe)` and use a smaller `smooth_k` to keep the example fast.
+
+```{r run-tweedspot}
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  covariates = ~ sample_name,
+  two_part = FALSE,
+  family = "tw",
+  fit_method = "REML",
+  use_bam = TRUE,
+  bam_discrete = TRUE,
+  smooth_k = 10
+)
+```
+
+# Inspect results
+
+TweedSpot writes per-gene outputs into `rowData(input)`. The main result
+columns are:
+
+- `tweedspot_stat`: spatial smooth test statistic
+- `tweedspot_pval`: raw p-value
+- `tweedspot_padj`: adjusted p-value
+- `tweedspot_edf`: effective degrees of freedom of the spatial smooth
+- `tweedspot_dev_expl`: deviance explained by the fitted GAM
+
+```{r inspect-results}
+res <- as.data.frame(rowData(spe_res))
+
+head(res[, c(
+  "tweedspot_stat",
+  "tweedspot_pval",
+  "tweedspot_padj",
+  "tweedspot_edf",
+  "tweedspot_dev_expl"
+)])
+```
+
+We can also rank genes by adjusted p-value:
+
+```{r top-genes}
+top_idx <- order(res$tweedspot_padj, decreasing = FALSE, na.last = NA)
+head(res[top_idx, c(
+  "tweedspot_pval",
+  "tweedspot_padj",
+  "tweedspot_edf",
+  "tweedspot_dev_expl"
+)])
+```
+
+# Notes
+
+- TweedSpot currently supports the agnostic SVG setting.
+- Covariates are specified from `colData(input)` using a one-sided formula such
+  as `~ batch + age + sex`.
+- If `colData(input)$sizeFactor` is present, TweedSpot uses it as the library
+  size adjustment. Otherwise, it falls back to total-count scaling.
+
+# Session information
+
+```{r session-info}
+sessionInfo()
+```
