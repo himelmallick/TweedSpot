@@ -25,9 +25,14 @@
 #' @param gene_biotype_col Optional `rowData(input)` column containing gene
 #'   biotypes or categories to use for mitochondrial/ribosomal exclusion.
 #'   Default `NULL`.
+#' @param drop_zero_spots Logical; if `TRUE`, drop spatial locations with zero
+#'   total counts after gene filtering. Default `TRUE`.
+#' @param report Logical; if `TRUE`, print a short summary of how many genes and
+#'   spots were retained or removed. Default `FALSE`.
 #'
 #' @return A filtered `SpatialExperiment` containing only genes that pass all
-#'   requested thresholds.
+#'   requested thresholds and, by default, only spatial locations with positive
+#'   total counts after filtering.
 #'
 #' @examples
 #' \dontrun{
@@ -37,7 +42,8 @@
 #'   spe,
 #'   filter_genes_ncounts = 10,
 #'   filter_genes_pcspots = 5,
-#'   filter_genes_nspots = 3
+#'   filter_genes_nspots = 3,
+#'   drop_zero_spots = TRUE
 #' )
 #' }
 #' @export
@@ -51,7 +57,9 @@ filter_genes <- function(input,
                          exclude_mito = FALSE,
                          exclude_ribo = FALSE,
                          gene_name_col = NULL,
-                         gene_biotype_col = NULL) {
+                         gene_biotype_col = NULL,
+                         drop_zero_spots = TRUE,
+                         report = FALSE) {
 
   stopifnot(methods::is(input, "SpatialExperiment"))
   tweedspot_check_scalar(filter_genes_ncounts, "filter_genes_ncounts", min_value = 0)
@@ -66,6 +74,12 @@ filter_genes <- function(input,
   if (!is.logical(exclude_ribo) || length(exclude_ribo) != 1L || is.na(exclude_ribo)) {
     stop("`exclude_ribo` must be `TRUE` or `FALSE`.")
   }
+  if (!is.logical(drop_zero_spots) || length(drop_zero_spots) != 1L || is.na(drop_zero_spots)) {
+    stop("`drop_zero_spots` must be `TRUE` or `FALSE`.")
+  }
+  if (!is.logical(report) || length(report) != 1L || is.na(report)) {
+    stop("`report` must be `TRUE` or `FALSE`.")
+  }
 
   Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
   keep_ncounts <- rowSums(Y) >= filter_genes_ncounts
@@ -74,6 +88,8 @@ filter_genes <- function(input,
   keep_mean <- rowMeans(Y) >= filter_genes_mean
   keep_var <- apply(Y, 1, stats::var) >= filter_genes_var
   keep <- keep_ncounts & keep_pcspots & keep_nspots & keep_mean & keep_var
+  n_genes_before <- nrow(input)
+  n_spots_before <- ncol(input)
 
   if (exclude_mito || exclude_ribo) {
     drop_genes <- tweedspot_annotation_exclusions(
@@ -86,5 +102,35 @@ filter_genes <- function(input,
     keep <- keep & !drop_genes
   }
 
-  input[keep, ]
+  output <- input[keep, ]
+  dropped_zero_spots <- 0L
+  if (drop_zero_spots) {
+    output_counts <- as.matrix(SummarizedExperiment::assay(output, assay_name))
+    keep_spots <- colSums(output_counts) > 0
+    dropped_zero_spots <- sum(!keep_spots)
+    output <- output[, keep_spots]
+  }
+  if (report) {
+    criteria_removed <- c(
+      ncounts = sum(!keep_ncounts),
+      pcspots = sum(!keep_pcspots),
+      nspots = sum(!keep_nspots),
+      mean = sum(!keep_mean),
+      variance = sum(!keep_var)
+    )
+    if (exclude_mito || exclude_ribo) {
+      criteria_removed <- c(criteria_removed, annotations = sum(drop_genes))
+    }
+    message(
+      "filter_genes retained ", nrow(output), "/", n_genes_before, " genes and ",
+      ncol(output), "/", n_spots_before, " spots."
+    )
+    message(
+      "Genes removed by criterion: ",
+      paste(names(criteria_removed), criteria_removed, sep = "=", collapse = ", "),
+      ". Spots dropped due to zero library size after filtering: ",
+      dropped_zero_spots, "."
+    )
+  }
+  output
 }

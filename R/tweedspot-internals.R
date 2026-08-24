@@ -9,7 +9,11 @@ tweedspot_libsize <- function(input, Y) {
   }
 
   ls <- colSums(Y)
-  ls / stats::median(ls)
+  med_ls <- stats::median(ls)
+  if (!is.finite(med_ls) || med_ls <= 0) {
+    stop("Library sizes could not be computed because the median spot total is non-positive.")
+  }
+  ls / med_ls
 }
 
 tweedspot_check_scalar <- function(x, name, min_value = NULL, max_value = NULL) {
@@ -22,6 +26,66 @@ tweedspot_check_scalar <- function(x, name, min_value = NULL, max_value = NULL) 
   if (!is.null(max_value) && x > max_value) {
     stop(sprintf("`%s` must be less than or equal to %s.", name, max_value))
   }
+}
+
+tweedspot_order_results <- function(res, key_col, decreasing = FALSE) {
+  key <- res[[key_col]]
+  stat <- res[["tweedspot_stat"]]
+  if (decreasing) {
+    ord <- order(is.na(key), -key, is.na(stat), -stat)
+  } else {
+    ord <- order(is.na(key), key, is.na(stat), -stat)
+  }
+  res[ord, , drop = FALSE]
+}
+
+tweedspot_resolve_gene <- function(input, gene) {
+  if (is.numeric(gene) && length(gene) == 1L && !is.na(gene)) {
+    idx <- as.integer(gene)
+    if (idx < 1L || idx > nrow(input)) {
+      stop("Numeric `gene` index is out of bounds.")
+    }
+  } else if (is.character(gene) && length(gene) == 1L && !is.na(gene)) {
+    idx <- match(gene, rownames(input))
+    if (is.na(idx) && "gene_name" %in% colnames(SummarizedExperiment::rowData(input))) {
+      idx <- match(gene, as.character(SummarizedExperiment::rowData(input)$gene_name))
+    }
+    if (is.na(idx)) {
+      stop("`gene` was not found among row names or `rowData(input)$gene_name`.")
+    }
+  } else {
+    stop("`gene` must be a single row index, row name, or gene name.")
+  }
+
+  label <- rownames(input)[idx]
+  if ("gene_name" %in% colnames(SummarizedExperiment::rowData(input))) {
+    gene_name <- as.character(SummarizedExperiment::rowData(input)$gene_name[idx])
+    if (!is.na(gene_name) && nzchar(gene_name)) {
+      label <- paste0(gene_name, " (", rownames(input)[idx], ")")
+    }
+  }
+  list(index = idx, label = label)
+}
+
+tweedspot_plot_coords <- function(input) {
+  coords <- SpatialExperiment::spatialCoords(input)
+  if (ncol(coords) < 2L) {
+    stop("`input` must contain at least two spatial coordinates per location.")
+  }
+  coords[, seq_len(2), drop = FALSE]
+}
+
+tweedspot_plot_theme <- function() {
+  ggplot2::theme_minimal(base_size = 12) +
+    ggplot2::theme(
+      panel.grid = ggplot2::element_blank(),
+      axis.text = ggplot2::element_blank(),
+      axis.ticks = ggplot2::element_blank(),
+      panel.border = ggplot2::element_rect(color = "#D9D4CC", fill = NA, linewidth = 0.6),
+      plot.title = ggplot2::element_text(face = "bold", size = 14),
+      legend.title = ggplot2::element_text(face = "bold"),
+      legend.position = "right"
+    )
 }
 
 tweedspot_annotation_exclusions <- function(input, exclude_mito, exclude_ribo,
@@ -116,6 +180,16 @@ tweedspot_covariates <- function(input, covariates) {
     }
   }
 
+  constant_covariates <- vapply(covariate_data, function(x) {
+    length(unique(x)) < 2L
+  }, logical(1))
+  if (any(constant_covariates)) {
+    stop(sprintf(
+      "Referenced `covariates` must vary across spatial locations. Constant columns: %s.",
+      paste(names(covariate_data)[constant_covariates], collapse = ", ")
+    ))
+  }
+
   reserved <- c("expr", "x", "y", "libsz")
   sanitized_names <- make.names(names(covariate_data), unique = TRUE)
   if (any(sanitized_names %in% reserved)) {
@@ -158,6 +232,34 @@ tweedspot_fit <- function(formula, family, data, fit_method, use_bam,
   )
 }
 
+tweedspot_fit_single_gene <- function(expr, coords, libsz, covariates, family,
+                                      fit_method, use_bam, bam_discrete,
+                                      bam_nthreads, smooth_k) {
+  if (any(!is.finite(libsz) | libsz <= 0)) {
+    stop(
+      "Library sizes must be positive and finite for every spatial location. ",
+      "This often happens when filtered spots have zero total counts; remove those spots ",
+      "or provide a positive `colData(input)$sizeFactor`."
+    )
+  }
+  d_base <- data.frame(x = coords[, 1], y = coords[, 2], libsz = libsz)
+  if (!is.null(covariates)) {
+    d_base <- cbind(d_base, covariates$data)
+  }
+  smooth_k <- tweedspot_basis_k(coords, smooth_k)
+  smooth_term <- sprintf("s(x, y, k = %d)", smooth_k)
+  cov_terms <- if (is.null(covariates)) character(0) else covariates$terms
+  rhs <- paste(c(smooth_term, cov_terms, "offset(log(libsz))"), collapse = " + ")
+  form <- stats::as.formula(sprintf("expr ~ %s", rhs))
+  d <- cbind(expr = as.numeric(expr), d_base)
+  tryCatch(
+    suppressWarnings(
+      tweedspot_fit(form, family, d, fit_method, use_bam, bam_discrete, bam_nthreads)
+    ),
+    error = function(e) NULL
+  )
+}
+
 tweedspot_basis_k <- function(coords, smooth_k = NULL, default_k = 30L) {
   n_unique <- nrow(unique(as.data.frame(coords[, seq_len(min(2, ncol(coords))), drop = FALSE])))
   if (n_unique <= 3L) {
@@ -172,6 +274,13 @@ tweedspot_basis_k <- function(coords, smooth_k = NULL, default_k = 30L) {
 tweedspot_agnostic <- function(Y, coords, libsz, covariates, two_part, combine,
                                family, fit_method, use_bam, bam_discrete,
                                bam_nthreads, smooth_k, BPPARAM) {
+  if (any(!is.finite(libsz) | libsz <= 0)) {
+    stop(
+      "Library sizes must be positive and finite for every spatial location. ",
+      "This often happens when filtered spots have zero total counts; remove those spots ",
+      "or provide a positive `colData(input)$sizeFactor`."
+    )
+  }
   d_base <- data.frame(x = coords[, 1], y = coords[, 2], libsz = libsz)
   if (!is.null(covariates)) {
     d_base <- cbind(d_base, covariates$data)
@@ -220,6 +329,11 @@ tweedspot_agnostic <- function(Y, coords, libsz, covariates, two_part, combine,
   M <- do.call(rbind, BiocParallel::bplapply(seq_len(nrow(Y)), one, BPPARAM = BPPARAM))
 
   if (!two_part) {
+    if (all(is.na(M[, "pval"]))) {
+      stop(
+        "All gene-wise TweedSpot fits failed. Check covariates, library sizes, and filtering thresholds."
+      )
+    }
     return(list(
       stat = M[, "stat"],
       pval = M[, "pval"],
@@ -240,6 +354,11 @@ tweedspot_agnostic <- function(Y, coords, libsz, covariates, two_part, combine,
     }, numeric(1)),
     min = pmin(M[, "pval"], M[, "plogit"], na.rm = TRUE)
   )
+  if (all(is.na(combined))) {
+    stop(
+      "All gene-wise TweedSpot fits failed. Check covariates, library sizes, and filtering thresholds."
+    )
+  }
   list(
     stat = M[, "stat"],
     pval = combined,

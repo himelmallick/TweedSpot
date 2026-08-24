@@ -8,7 +8,16 @@ filter_genes(
   input,
   assay_name = "counts",
   filter_genes_ncounts = 5,
-  filter_genes_pcspots = 5
+  filter_genes_pcspots = 5,
+  filter_genes_nspots = 0,
+  filter_genes_mean = 0,
+  filter_genes_var = 0,
+  exclude_mito = FALSE,
+  exclude_ribo = FALSE,
+  gene_name_col = NULL,
+  gene_biotype_col = NULL,
+  drop_zero_spots = TRUE,
+  report = FALSE
 )
 }
 \arguments{
@@ -21,10 +30,40 @@ required to retain a gene. Default \code{5}.}
 
 \item{filter_genes_pcspots}{Minimum percent of spatial locations with
 non-zero counts required to retain a gene. Default \code{5}.}
+
+\item{filter_genes_nspots}{Minimum number of spatial locations with non-zero
+counts required to retain a gene. Default \code{0}.}
+
+\item{filter_genes_mean}{Minimum mean count across spatial locations required
+to retain a gene. Default \code{0}.}
+
+\item{filter_genes_var}{Minimum variance across spatial locations required to
+retain a gene. Default \code{0}.}
+
+\item{exclude_mito}{Logical; if \code{TRUE}, remove mitochondrial genes using
+\code{rowData(input)} annotations or gene-name heuristics. Default \code{FALSE}.}
+
+\item{exclude_ribo}{Logical; if \code{TRUE}, remove ribosomal genes using
+\code{rowData(input)} annotations or gene-name heuristics. Default \code{FALSE}.}
+
+\item{gene_name_col}{Optional \code{rowData(input)} column containing gene names
+to use for mitochondrial/ribosomal exclusion. If \code{NULL}, row names are
+used. Default \code{NULL}.}
+
+\item{gene_biotype_col}{Optional \code{rowData(input)} column containing gene
+biotypes or categories to use for mitochondrial/ribosomal exclusion.
+Default \code{NULL}.}
+
+\item{drop_zero_spots}{Logical; if \code{TRUE}, drop spatial locations with zero
+total counts after gene filtering. Default \code{TRUE}.}
+
+\item{report}{Logical; if \code{TRUE}, print a short summary of how many genes and
+spots were retained or removed. Default \code{FALSE}.}
 }
 \value{
-A filtered \code{SpatialExperiment} containing only genes that pass both
-thresholds.
+A filtered \code{SpatialExperiment} containing only genes that pass all
+requested thresholds and, by default, only spatial locations with positive
+total counts after filtering.
 }
 \description{
 \code{filter_genes()} removes genes with too few total counts or too little
@@ -34,6 +73,12 @@ spatial prevalence to support stable downstream modeling.
 \dontrun{
 library(STexampleData)
 spe <- ST_mouseOB()
-spe <- filter_genes(spe, filter_genes_ncounts = 10, filter_genes_pcspots = 5)
+spe <- filter_genes(
+  spe,
+  filter_genes_ncounts = 10,
+  filter_genes_pcspots = 5,
+  filter_genes_nspots = 3,
+  drop_zero_spots = TRUE
+)
 }
 }

@@ -38,8 +38,7 @@ spe <- spe[, colData(spe)$in_tissue == 1]
 
 spe_res <- tweedspot(
   input = spe,
-  assay_name = "counts",
-  covariates = ~ sample_name
+  assay_name = "counts"
 )
 
 head(SummarizedExperiment::rowData(spe_res)[, c(
@@ -67,7 +66,9 @@ spe <- filter_genes(
   filter_genes_pcspots = 5,
   filter_genes_nspots = 3,
   filter_genes_mean = 0.1,
-  exclude_mito = TRUE
+  exclude_mito = TRUE,
+  drop_zero_spots = TRUE,
+  report = TRUE
 )
 
 spe_res <- tweedspot(
@@ -87,6 +88,8 @@ spe_res <- tweedspot(
 TweedSpot currently exposes two user-facing functions:
 
 - `filter_genes()`: prefilter low-information genes before model fitting
+- `get_tweedspot_results()`: extract and sort TweedSpot results from `rowData()`
+- `top_spatial_genes()`: return the top-ranked spatially variable genes
 - `tweedspot()`: run spatially variable gene detection on a
   `SpatialExperiment`
 

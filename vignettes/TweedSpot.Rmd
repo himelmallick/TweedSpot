@@ -1,5 +1,5 @@
 ---
-title: "Getting Started with TweedSpot"
+title: "TweedSpot"
 author: "Nalin Arora"
 date: "`r Sys.Date()`"
 output:
@@ -31,7 +31,8 @@ This vignette covers a standard workflow:
 1. load a `SpatialExperiment`
 2. prefilter low-information genes
 3. fit TweedSpot
-4. inspect gene-level results
+4. extract and rank gene-level results
+5. visualize observed and fitted spatial patterns
 
 # Load packages
 
@@ -40,6 +41,7 @@ library(TweedSpot)
 library(SpatialExperiment)
 library(SummarizedExperiment)
 library(STexampleData)
+library(BiocParallel)
 ```
 
 # Load example data
@@ -51,8 +53,7 @@ small subset of genes.
 ```{r load-data}
 spe <- Visium_humanDLPFC()
 spe <- spe[, colData(spe)$in_tissue == 1]
-spe <- spe[seq_len(min(100, nrow(spe))), ]
-
+spe <- spe[seq_len(min(250, nrow(spe))), ]
 spe
 ```
 
@@ -61,16 +62,19 @@ spe
 `filter_genes()` removes genes with limited information before model fitting.
 In addition to minimum total counts and percent of nonzero spots, it can also
 filter on the number of nonzero spots, mean counts, variance, and optionally
-exclude mitochondrial or ribosomal genes.
+exclude mitochondrial or ribosomal genes. By default it also drops spots with
+zero total counts after gene filtering.
 
 ```{r filter-genes}
-spe <- filter_genes(
+spe <- TweedSpot::filter_genes(
   input = spe,
   assay_name = "counts",
   filter_genes_ncounts = 5,
   filter_genes_pcspots = 5,
   filter_genes_nspots = 3,
-  filter_genes_mean = 0.05
+  filter_genes_mean = 0.05,
+  drop_zero_spots = TRUE,
+  report = TRUE
 )
 
 spe
@@ -78,24 +82,30 @@ spe
 
 # Fit TweedSpot
 
-We now fit TweedSpot on the filtered dataset. Here we adjust for `sample_name`
-from `colData(spe)` and use a smaller `smooth_k` to keep the example fast.
+We now fit TweedSpot on the filtered dataset. For this example object,
+`sample_id` is constant across all retained spots, so we do not include it as a
+covariate. We also use a smaller `smooth_k` to keep the example fast.
 
 ```{r run-tweedspot}
+
+
+bp <- MulticoreParam(workers = 4)
+
 spe_res <- tweedspot(
   input = spe,
   assay_name = "counts",
-  covariates = ~ sample_name,
   two_part = FALSE,
   family = "tw",
   fit_method = "REML",
   use_bam = TRUE,
   bam_discrete = TRUE,
-  smooth_k = 10
+  smooth_k = 10,
+  BPPARAM = bp,
+  verbose = TRUE
 )
 ```
 
-# Inspect results
+# Extract and rank results
 
 TweedSpot writes per-gene outputs into `rowData(input)`. The main result
 columns are:
@@ -106,28 +116,33 @@ columns are:
 - `tweedspot_edf`: effective degrees of freedom of the spatial smooth
 - `tweedspot_dev_expl`: deviance explained by the fitted GAM
 
-```{r inspect-results}
-res <- as.data.frame(rowData(spe_res))
+`get_tweedspot_results()` returns a clean `data.frame` representation of these
+results. By default it sorts by adjusted p-value, breaking ties by
+`tweedspot_stat`.
 
-head(res[, c(
-  "tweedspot_stat",
-  "tweedspot_pval",
-  "tweedspot_padj",
-  "tweedspot_edf",
-  "tweedspot_dev_expl"
-)])
+```{r inspect-results}
+res <- get_tweedspot_results(spe_res)
+
+head(res)
 ```
 
-We can also rank genes by adjusted p-value:
+`top_spatial_genes()` provides a convenience wrapper for retrieving the top
+hits by adjusted p-value, raw p-value, statistic, or deviance explained.
 
 ```{r top-genes}
-top_idx <- order(res$tweedspot_padj, decreasing = FALSE, na.last = NA)
-head(res[top_idx, c(
-  "tweedspot_pval",
-  "tweedspot_padj",
-  "tweedspot_edf",
-  "tweedspot_dev_expl"
-)])
+top_spatial_genes(spe_res, n = 10, rank_by = "padj")
+```
+
+# Visualize observed and fitted spatial patterns
+
+The package also provides plotting helpers for the raw observed expression
+pattern and the fitted spatial smooth for a single gene.
+
+```{r plot-spatial, fig.width=10, fig.height=4}
+top_gene <- res$gene_name[1]
+
+plot_spatial_gene(spe_res, gene = top_gene)
+plot_spatial_fit(spe_res, gene = top_gene, family = "tw", smooth_k = 10)
 ```
 
 # Notes
@@ -137,6 +152,10 @@ head(res[top_idx, c(
   as `~ batch + age + sex`.
 - If `colData(input)$sizeFactor` is present, TweedSpot uses it as the library
   size adjustment. Otherwise, it falls back to total-count scaling.
+- `filter_genes()` can optionally report how many genes and spots were retained
+  and how many were removed by each criterion.
+- `tweedspot()` can print lightweight progress messages through
+  `verbose = TRUE`.
 
 # Session information
 

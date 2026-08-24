@@ -17,7 +17,8 @@ tweedspot(
   bam_nthreads = 1L,
   smooth_k = NULL,
   padj_method = "BY",
-  BPPARAM = BiocParallel::bpparam()
+  BPPARAM = BiocParallel::bpparam(),
+  verbose = TRUE
 )
 }
 \arguments{
@@ -60,10 +61,14 @@ Default \code{"BY"}.}
 \item{BPPARAM}{A \link[BiocParallel:BiocParallelParam]{BiocParallel::BiocParallelParam} object controlling
 parallelization across genes. Default \code{\link[BiocParallel:bpparam]{BiocParallel::bpparam()}}, which
 uses the currently registered BiocParallel backend.}
+
+\item{verbose}{Logical; if \code{TRUE}, print lightweight progress messages before
+and after gene-wise model fitting. Default \code{TRUE}.}
 }
 \value{
-The input \code{SpatialExperiment} with per-gene statistic, p-value, and
-adjusted p-value written to \code{\link[SummarizedExperiment:rowData]{SummarizedExperiment::rowData()}}.
+The input \code{SpatialExperiment} with per-gene statistic, p-value,
+adjusted p-value, smooth effective degrees of freedom, and deviance
+explained written to \code{\link[SummarizedExperiment:rowData]{SummarizedExperiment::rowData()}}.
 }
 \description{
 \code{tweedspot()} fits a Tweedie GAM with a spatial smooth \code{s(x, y)} per gene
@@ -73,7 +78,7 @@ and tests each gene for overall spatial variation.
 \dontrun{
 library(STexampleData)
 spe <- ST_mouseOB()
-spe <- tweedspot(spe, covariates = ~ sample_name)
+spe <- tweedspot(spe)
 head(SummarizedExperiment::rowData(spe))
 }
 }

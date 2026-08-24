@@ -30,6 +30,8 @@
 #' @param BPPARAM A [BiocParallel::BiocParallelParam] object controlling
 #'   parallelization across genes. Default [BiocParallel::bpparam()], which
 #'   uses the currently registered BiocParallel backend.
+#' @param verbose Logical; if `TRUE`, print lightweight progress messages before
+#'   and after gene-wise model fitting. Default `TRUE`.
 #'
 #' @return The input `SpatialExperiment` with per-gene statistic, p-value,
 #'   adjusted p-value, smooth effective degrees of freedom, and deviance
@@ -39,7 +41,7 @@
 #' \dontrun{
 #' library(STexampleData)
 #' spe <- ST_mouseOB()
-#' spe <- tweedspot(spe, covariates = ~ sample_name)
+#' spe <- tweedspot(spe)
 #' head(SummarizedExperiment::rowData(spe))
 #' }
 #' @export
@@ -55,7 +57,8 @@ tweedspot <- function(input,
                       bam_nthreads = 1L,
                       smooth_k = NULL,
                       padj_method = "BY",
-                      BPPARAM = BiocParallel::bpparam()) {
+                      BPPARAM = BiocParallel::bpparam(),
+                      verbose = TRUE) {
 
   combine <- match.arg(combine)
   stopifnot(methods::is(input, "SpatialExperiment"))
@@ -69,6 +72,15 @@ tweedspot <- function(input,
   if (ncol(coords) < 2) {
     stop("`input` must contain at least two spatial coordinates per location.")
   }
+  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
+    stop("`verbose` must be `TRUE` or `FALSE`.")
+  }
+  if (verbose) {
+    message(
+      "Running TweedSpot on ", nrow(Y), " genes across ", ncol(Y), " spatial locations ",
+      "with ", BiocParallel::bpnworkers(BPPARAM), " worker(s)."
+    )
+  }
   res <- tweedspot_agnostic(Y, coords, libsz, covariates, two_part, combine,
                             family, fit_method, use_bam, bam_discrete,
                             bam_nthreads, smooth_k, BPPARAM)
@@ -79,5 +91,9 @@ tweedspot <- function(input,
     stats::p.adjust(res$pval, method = padj_method)
   SummarizedExperiment::rowData(input)$tweedspot_edf <- res$edf
   SummarizedExperiment::rowData(input)$tweedspot_dev_expl <- res$dev_expl
+  if (verbose) {
+    n_sig <- sum(!is.na(res$pval))
+    message("Completed TweedSpot fits for ", n_sig, " gene(s).")
+  }
   input
 }
