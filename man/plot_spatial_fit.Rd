@@ -57,7 +57,21 @@ and visualizes the fitted spatial smooth contribution across spatial
 locations.
 }
 \examples{
-\dontrun{
-plot_spatial_fit(spe, gene = 1)
-}
+counts <- matrix(
+  c(0, 1, 2, 3, 4, 5, 5, 4, 5, 4, 3, 2),
+  nrow = 2,
+  byrow = TRUE
+)
+rownames(counts) <- c("gene1", "gene2")
+colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+spe <- SpatialExperiment::SpatialExperiment(
+  assays = list(counts = counts),
+  rowData = S4Vectors::DataFrame(
+    gene_id = rownames(counts),
+    gene_name = rownames(counts)
+  ),
+  colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
+  spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+)
+plot_spatial_fit(spe, gene = "gene1", covariates = ~ batch, family = "poisson")
 }

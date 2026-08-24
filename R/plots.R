@@ -14,9 +14,19 @@
 #' @return A `ggplot2` object.
 #'
 #' @examples
-#' \dontrun{
-#' plot_spatial_gene(spe, gene = 1)
-#' }
+#' counts <- matrix(c(0, 1, 2, 3, 1, 1, 1, 1), nrow = 2, byrow = TRUE)
+#' rownames(counts) <- c("gene1", "gene2")
+#' colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+#' spe <- SpatialExperiment::SpatialExperiment(
+#'   assays = list(counts = counts),
+#'   rowData = S4Vectors::DataFrame(
+#'     gene_id = rownames(counts),
+#'     gene_name = rownames(counts)
+#'   ),
+#'   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
+#'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+#' )
+#' plot_spatial_gene(spe, gene = "gene1")
 #' @export
 plot_spatial_gene <- function(input,
                               gene,
@@ -96,9 +106,23 @@ plot_spatial_gene <- function(input,
 #' @return A `ggplot2` object.
 #'
 #' @examples
-#' \dontrun{
-#' plot_spatial_fit(spe, gene = 1)
-#' }
+#' counts <- matrix(
+#'   c(0, 1, 2, 3, 4, 5, 5, 4, 5, 4, 3, 2),
+#'   nrow = 2,
+#'   byrow = TRUE
+#' )
+#' rownames(counts) <- c("gene1", "gene2")
+#' colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+#' spe <- SpatialExperiment::SpatialExperiment(
+#'   assays = list(counts = counts),
+#'   rowData = S4Vectors::DataFrame(
+#'     gene_id = rownames(counts),
+#'     gene_name = rownames(counts)
+#'   ),
+#'   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
+#'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+#' )
+#' plot_spatial_fit(spe, gene = "gene1", covariates = ~ batch, family = "poisson")
 #' @export
 plot_spatial_fit <- function(input,
                              gene,
@@ -117,16 +141,11 @@ plot_spatial_fit <- function(input,
   }
   tweedspot_check_scalar(point_size, "point_size", min_value = 0)
 
-  gene_info <- tweedspot_resolve_gene(input, gene)
-  Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
-  coords <- scale(SpatialExperiment::spatialCoords(input))
-  libsz <- tweedspot_libsize(input, Y)
-  covariate_spec <- tweedspot_covariates(input, covariates)
-  fit <- tweedspot_fit_single_gene(
-    expr = as.numeric(Y[gene_info$index, ]),
-    coords = coords,
-    libsz = libsz,
-    covariates = covariate_spec,
+  fit_data <- tweedspot_prepare_plot_fit_data(
+    input = input,
+    gene = gene,
+    assay_name = assay_name,
+    covariates = covariates,
     family = family,
     fit_method = fit_method,
     use_bam = use_bam,
@@ -134,20 +153,8 @@ plot_spatial_fit <- function(input,
     bam_nthreads = bam_nthreads,
     smooth_k = smooth_k
   )
-  if (is.null(fit)) {
-    stop("The single-gene spatial model failed to fit for the requested gene.")
-  }
 
-  terms <- stats::predict(fit, type = "terms")
-  smooth_values <- as.numeric(terms[, 1])
-  raw_coords <- tweedspot_plot_coords(input)
-  df <- data.frame(
-    x = raw_coords[, 1],
-    y = raw_coords[, 2],
-    value = smooth_values
-  )
-
-  ggplot2::ggplot(df, ggplot2::aes(x = x, y = y, color = value)) +
+  ggplot2::ggplot(fit_data$df, ggplot2::aes(x = x, y = y, color = value)) +
     ggplot2::geom_point(size = point_size, alpha = 0.95) +
     ggplot2::scale_color_gradient2(
       low = "#1B4D6B",
@@ -160,7 +167,7 @@ plot_spatial_fit <- function(input,
     ggplot2::scale_y_reverse() +
     tweedspot_plot_theme() +
     ggplot2::labs(
-      title = paste0("Fitted spatial signal: ", gene_info$label),
+      title = paste0("Fitted spatial signal: ", fit_data$label),
       x = "x",
       y = "y"
     )

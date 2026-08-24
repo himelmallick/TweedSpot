@@ -3,3 +3,6 @@
 ^\.git$
 ^\.github$
 ^README\.Rmd$
+^\.DS_Store$
+^TweedSpot\.Rcheck$
+^TweedSpot_[0-9.-]+\.tar\.gz$

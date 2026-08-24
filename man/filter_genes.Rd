@@ -70,15 +70,21 @@ total counts after filtering.
 spatial prevalence to support stable downstream modeling.
 }
 \examples{
-\dontrun{
-library(STexampleData)
-spe <- ST_mouseOB()
-spe <- filter_genes(
-  spe,
-  filter_genes_ncounts = 10,
-  filter_genes_pcspots = 5,
-  filter_genes_nspots = 3,
-  drop_zero_spots = TRUE
+counts <- matrix(
+  c(0, 1, 2, 3, 1, 1, 1, 1, 5, 4, 3, 2),
+  nrow = 3,
+  byrow = TRUE
 )
-}
+rownames(counts) <- paste0("gene", seq_len(nrow(counts)))
+colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+spe <- SpatialExperiment::SpatialExperiment(
+  assays = list(counts = counts),
+  rowData = S4Vectors::DataFrame(
+    gene_id = rownames(counts),
+    gene_name = rownames(counts)
+  ),
+  colData = S4Vectors::DataFrame(sample_id = rep("sample1", ncol(counts))),
+  spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+)
+filter_genes(spe, filter_genes_ncounts = 3, filter_genes_nspots = 2)
 }

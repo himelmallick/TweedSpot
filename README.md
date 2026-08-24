@@ -6,7 +6,7 @@ count family.
 
 ## Installation
 
-TweedSpot is intended to be installed from GitHub.
+TweedSpot is currently available from GitHub.
 
 ```r
 install.packages("remotes")
@@ -85,7 +85,7 @@ spe_res <- tweedspot(
 
 ## Main Functions
 
-TweedSpot currently exposes two user-facing functions:
+TweedSpot currently exposes the following user-facing functions:
 
 - `filter_genes()`: prefilter low-information genes before model fitting
 - `get_tweedspot_results()`: extract and sort TweedSpot results from `rowData()`
@@ -112,10 +112,12 @@ TweedSpot writes these per-gene fields to `rowData(input)`:
 - `tweedspot_edf`
 - `tweedspot_dev_expl`
 
-## Status
+## Package Notes
 
-The package is under active development. A vignette and broader test coverage
-can be added on top of this installable package skeleton.
+The package is built around the `SpatialExperiment` container and writes
+gene-level inference back into `rowData()`. See the vignette for a fuller
+workflow including filtering, parallel model fitting, result extraction, and
+visualization.
 
 ## License
 

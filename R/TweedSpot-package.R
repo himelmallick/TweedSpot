@@ -7,6 +7,9 @@
 #' `tweedspot()` for spatially variable gene detection with Tweedie generalized
 #' additive models.
 #'
+#' @importFrom S4Vectors DataFrame
 #' @keywords internal
 #' @name TweedSpot-package
 "_PACKAGE"
+
+utils::globalVariables(c("value", "x", "y"))

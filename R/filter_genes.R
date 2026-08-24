@@ -35,17 +35,23 @@
 #'   total counts after filtering.
 #'
 #' @examples
-#' \dontrun{
-#' library(STexampleData)
-#' spe <- ST_mouseOB()
-#' spe <- filter_genes(
-#'   spe,
-#'   filter_genes_ncounts = 10,
-#'   filter_genes_pcspots = 5,
-#'   filter_genes_nspots = 3,
-#'   drop_zero_spots = TRUE
+#' counts <- matrix(
+#'   c(0, 1, 2, 3, 1, 1, 1, 1, 5, 4, 3, 2),
+#'   nrow = 3,
+#'   byrow = TRUE
 #' )
-#' }
+#' rownames(counts) <- paste0("gene", seq_len(nrow(counts)))
+#' colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+#' spe <- SpatialExperiment::SpatialExperiment(
+#'   assays = list(counts = counts),
+#'   rowData = S4Vectors::DataFrame(
+#'     gene_id = rownames(counts),
+#'     gene_name = rownames(counts)
+#'   ),
+#'   colData = S4Vectors::DataFrame(sample_id = rep("sample1", ncol(counts))),
+#'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+#' )
+#' filter_genes(spe, filter_genes_ncounts = 3, filter_genes_nspots = 2)
 #' @export
 filter_genes <- function(input,
                          assay_name = "counts",
@@ -68,26 +74,21 @@ filter_genes <- function(input,
   tweedspot_check_scalar(filter_genes_nspots, "filter_genes_nspots", min_value = 0)
   tweedspot_check_scalar(filter_genes_mean, "filter_genes_mean", min_value = 0)
   tweedspot_check_scalar(filter_genes_var, "filter_genes_var", min_value = 0)
-  if (!is.logical(exclude_mito) || length(exclude_mito) != 1L || is.na(exclude_mito)) {
-    stop("`exclude_mito` must be `TRUE` or `FALSE`.")
-  }
-  if (!is.logical(exclude_ribo) || length(exclude_ribo) != 1L || is.na(exclude_ribo)) {
-    stop("`exclude_ribo` must be `TRUE` or `FALSE`.")
-  }
-  if (!is.logical(drop_zero_spots) || length(drop_zero_spots) != 1L || is.na(drop_zero_spots)) {
-    stop("`drop_zero_spots` must be `TRUE` or `FALSE`.")
-  }
-  if (!is.logical(report) || length(report) != 1L || is.na(report)) {
-    stop("`report` must be `TRUE` or `FALSE`.")
-  }
+  tweedspot_check_flag(exclude_mito, "exclude_mito")
+  tweedspot_check_flag(exclude_ribo, "exclude_ribo")
+  tweedspot_check_flag(drop_zero_spots, "drop_zero_spots")
+  tweedspot_check_flag(report, "report")
 
   Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
-  keep_ncounts <- rowSums(Y) >= filter_genes_ncounts
-  keep_pcspots <- rowMeans(Y > 0) * 100 >= filter_genes_pcspots
-  keep_nspots <- rowSums(Y > 0) >= filter_genes_nspots
-  keep_mean <- rowMeans(Y) >= filter_genes_mean
-  keep_var <- apply(Y, 1, stats::var) >= filter_genes_var
-  keep <- keep_ncounts & keep_pcspots & keep_nspots & keep_mean & keep_var
+  filters <- tweedspot_gene_filters(
+    Y = Y,
+    filter_genes_ncounts = filter_genes_ncounts,
+    filter_genes_pcspots = filter_genes_pcspots,
+    filter_genes_nspots = filter_genes_nspots,
+    filter_genes_mean = filter_genes_mean,
+    filter_genes_var = filter_genes_var
+  )
+  keep <- filters$keep
   n_genes_before <- nrow(input)
   n_spots_before <- ncol(input)
 
@@ -112,24 +113,21 @@ filter_genes <- function(input,
   }
   if (report) {
     criteria_removed <- c(
-      ncounts = sum(!keep_ncounts),
-      pcspots = sum(!keep_pcspots),
-      nspots = sum(!keep_nspots),
-      mean = sum(!keep_mean),
-      variance = sum(!keep_var)
+      ncounts = sum(!filters$keep_ncounts),
+      pcspots = sum(!filters$keep_pcspots),
+      nspots = sum(!filters$keep_nspots),
+      mean = sum(!filters$keep_mean),
+      variance = sum(!filters$keep_var)
     )
     if (exclude_mito || exclude_ribo) {
       criteria_removed <- c(criteria_removed, annotations = sum(drop_genes))
     }
-    message(
-      "filter_genes retained ", nrow(output), "/", n_genes_before, " genes and ",
-      ncol(output), "/", n_spots_before, " spots."
-    )
-    message(
-      "Genes removed by criterion: ",
-      paste(names(criteria_removed), criteria_removed, sep = "=", collapse = ", "),
-      ". Spots dropped due to zero library size after filtering: ",
-      dropped_zero_spots, "."
+    tweedspot_report_filtering(
+      output = output,
+      n_genes_before = n_genes_before,
+      n_spots_before = n_spots_before,
+      criteria_removed = criteria_removed,
+      dropped_zero_spots = dropped_zero_spots
     )
   }
   output

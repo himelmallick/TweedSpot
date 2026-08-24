@@ -38,12 +38,24 @@
 #'   explained written to [SummarizedExperiment::rowData()].
 #'
 #' @examples
-#' \dontrun{
-#' library(STexampleData)
-#' spe <- ST_mouseOB()
-#' spe <- tweedspot(spe)
-#' head(SummarizedExperiment::rowData(spe))
-#' }
+#' counts <- matrix(
+#'   c(0, 1, 2, 3, 4, 5, 5, 4, 5, 4, 3, 2),
+#'   nrow = 2,
+#'   byrow = TRUE
+#' )
+#' rownames(counts) <- c("gene1", "gene2")
+#' colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+#' spe <- SpatialExperiment::SpatialExperiment(
+#'   assays = list(counts = counts),
+#'   rowData = S4Vectors::DataFrame(
+#'     gene_id = rownames(counts),
+#'     gene_name = rownames(counts)
+#'   ),
+#'   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
+#'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+#' )
+#' spe <- tweedspot(spe, family = "poisson", smooth_k = 4, BPPARAM = BiocParallel::SerialParam())
+#' SummarizedExperiment::rowData(spe)[, c("tweedspot_stat", "tweedspot_pval")]
 #' @export
 tweedspot <- function(input,
                       assay_name = "counts",
@@ -62,38 +74,28 @@ tweedspot <- function(input,
 
   combine <- match.arg(combine)
   stopifnot(methods::is(input, "SpatialExperiment"))
+  tweedspot_check_flag(verbose, "verbose")
 
-  Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
-  coords <- scale(SpatialExperiment::spatialCoords(input))
-  genes  <- rownames(input)
-  libsz  <- tweedspot_libsize(input, Y)
-  covariates <- tweedspot_covariates(input, covariates)
-
-  if (ncol(coords) < 2) {
-    stop("`input` must contain at least two spatial coordinates per location.")
-  }
-  if (!is.logical(verbose) || length(verbose) != 1L || is.na(verbose)) {
-    stop("`verbose` must be `TRUE` or `FALSE`.")
-  }
-  if (verbose) {
-    message(
-      "Running TweedSpot on ", nrow(Y), " genes across ", ncol(Y), " spatial locations ",
-      "with ", BiocParallel::bpnworkers(BPPARAM), " worker(s)."
-    )
-  }
-  res <- tweedspot_agnostic(Y, coords, libsz, covariates, two_part, combine,
+  fit_input <- tweedspot_prepare_input(
+    input = input,
+    assay_name = assay_name,
+    covariates = covariates
+  )
+  tweedspot_message_start(
+    verbose = verbose,
+    Y = fit_input$Y,
+    BPPARAM = BPPARAM
+  )
+  res <- tweedspot_agnostic(
+    fit_input$Y,
+    fit_input$coords,
+    fit_input$libsz,
+    fit_input$covariates,
+    two_part,
+    combine,
                             family, fit_method, use_bam, bam_discrete,
                             bam_nthreads, smooth_k, BPPARAM)
-
-  SummarizedExperiment::rowData(input)$tweedspot_stat <- res$stat
-  SummarizedExperiment::rowData(input)$tweedspot_pval <- res$pval
-  SummarizedExperiment::rowData(input)$tweedspot_padj <-
-    stats::p.adjust(res$pval, method = padj_method)
-  SummarizedExperiment::rowData(input)$tweedspot_edf <- res$edf
-  SummarizedExperiment::rowData(input)$tweedspot_dev_expl <- res$dev_expl
-  if (verbose) {
-    n_sig <- sum(!is.na(res$pval))
-    message("Completed TweedSpot fits for ", n_sig, " gene(s).")
-  }
+  input <- tweedspot_store_results(input, res, padj_method = padj_method)
+  tweedspot_message_end(verbose = verbose, pval = res$pval)
   input
 }

@@ -30,8 +30,22 @@ TweedSpot result columns.
 \code{rowData(input)} into a base \code{data.frame} and can optionally sort the output.
 }
 \examples{
-\dontrun{
-res <- get_tweedspot_results(spe_res)
-head(res)
-}
+counts <- matrix(c(1, 2, 3, 4, 2, 2), nrow = 2, byrow = TRUE)
+rownames(counts) <- c("gene1", "gene2")
+colnames(counts) <- paste0("spot", seq_len(ncol(counts)))
+spe <- SpatialExperiment::SpatialExperiment(
+  assays = list(counts = counts),
+  rowData = S4Vectors::DataFrame(
+    gene_id = rownames(counts),
+    gene_name = rownames(counts),
+    tweedspot_stat = c(4, 2),
+    tweedspot_pval = c(0.01, 0.05),
+    tweedspot_padj = c(0.02, 0.05),
+    tweedspot_edf = c(2, 2),
+    tweedspot_dev_expl = c(0.3, 0.1)
+  ),
+  colData = S4Vectors::DataFrame(sample_id = rep("sample1", ncol(counts))),
+  spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
+)
+get_tweedspot_results(spe)
 }

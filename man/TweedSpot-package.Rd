@@ -29,7 +29,7 @@ Authors:
 \itemize{
   \item Nalin Arora \email{naa4050@med.cornell.edu} (\href{https://orcid.org/0009-0009-1340-688X}{ORCID}) (affiliation: Cornell University)
   \item Himel Mallick \email{him4004@med.cornell.edu} (affiliation: Cornell University)
-  \item Vivian Jia-yin Myers \email{FIRST.LAST@cornell.edu} (affiliation: Cornell University)
+  \item Vivian Jia-yin Myers (affiliation: Cornell University)
 }
 
 }
