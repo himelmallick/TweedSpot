@@ -9,8 +9,7 @@ Authors@R: c(
     person("Himel", "Mallick", role = "aut",
            email = "him4004@med.cornell.edu",
            comment = c(affiliation = "Cornell University")),
-    person("Vivian Jia-yin", "Myers", role = "aut",
-           comment = c(affiliation = "Cornell University")))
+    person("Vivian", "Myers", role = "aut")))
 Description: TweedSpot detects spatially variable genes (SVGs) in spatially
     resolved transcriptomics data using self-adaptive Tweedie generalized
     additive models with nonparametric spatial smoothing. The method models raw
@@ -42,7 +41,6 @@ biocViews:
     Software,
     Transcriptomics,
     GeneExpression,
-    RiboSeq,
     Spatial,
     Regression,
     StatisticalMethod,

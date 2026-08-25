@@ -1,6 +1,6 @@
 ---
 title: "TweedSpot"
-author: "Nalin Arora"
+author: "Nalin Arora, Vivian Myers and Himel Mallick"
 date: "`r Sys.Date()`"
 output:
   BiocStyle::html_document:
@@ -25,6 +25,28 @@ TweedSpot detects spatially variable genes (SVGs) in spatial transcriptomics
 data using Tweedie generalized additive models (GAMs) with a spatial smooth.
 The package currently focuses on an agnostic SVG workflow built around the
 `SpatialExperiment` container.
+
+TweedSpot is intended to be useful to the broader spatial transcriptomics
+community, especially for analysts who want a method that models count data
+directly, adapts to heterogeneous mean-variance relationships, and plugs into
+standard downstream workflows for ranking, visualization, and interpretation of
+spatially variable genes. We are submitting the package to Bioconductor
+because we think it can serve as a broadly accessible, reproducible tool for
+community use and comparison across spatial datasets and analysis pipelines.
+
+Once available on Bioconductor, the release version can be installed with:
+
+```{r eval = FALSE}
+install.packages("BiocManager")
+BiocManager::install("TweedSpot")
+```
+
+The current development version can be installed from GitHub with:
+
+```{r eval = FALSE}
+install.packages("remotes")
+remotes::install_github("himelmallick/TweedSpot", dependencies = TRUE)
+```
 
 This vignette covers a standard workflow:
 
@@ -147,7 +169,6 @@ plot_spatial_fit(spe_res, gene = top_gene, family = "tw", smooth_k = 10)
 
 # Notes
 
-- TweedSpot currently supports the agnostic SVG setting.
 - Covariates are specified from `colData(input)` using a one-sided formula such
   as `~ batch + age + sex`.
 - If `colData(input)$sizeFactor` is present, TweedSpot uses it as the library

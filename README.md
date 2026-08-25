@@ -4,17 +4,31 @@ TweedSpot is an R package for detecting spatially variable genes (SVGs) in
 spatial omics data with spatial generalized additive models using a Tweedie
 count family.
 
+TweedSpot is designed for the broader spatial transcriptomics community, where
+users often want methods that model count data directly, remain flexible across
+different spatial expression patterns, and integrate cleanly with established
+analysis workflows. We are submitting TweedSpot to Bioconductor because we
+think it can be broadly useful as a community-facing method for reproducible
+SVG discovery, benchmarking, and downstream biological interpretation.
+
 ## Installation
 
-TweedSpot is currently available from GitHub.
+Once TweedSpot is available through Bioconductor, the release version can be
+installed with `BiocManager`:
+
+```r
+install.packages("BiocManager")
+BiocManager::install("TweedSpot")
+```
+
+The development version is currently available from GitHub:
 
 ```r
 install.packages("remotes")
 remotes::install_github("himelmallick/TweedSpot", dependencies = TRUE)
 ```
 
-Because TweedSpot depends on Bioconductor infrastructure, install missing
-Bioconductor packages first if needed:
+If you need to install core Bioconductor dependencies separately, you can use:
 
 ```r
 install.packages("BiocManager")
