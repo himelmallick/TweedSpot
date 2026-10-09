@@ -2,7 +2,7 @@ tweedspot_libsize <- function(input, Y, assay_name = "counts",
                               size_factor_method = c("scran", "library_size")) {
   coldata <- SummarizedExperiment::colData(input)
   if ("sizeFactor" %in% names(coldata)) {
-    sf <- as.numeric(coldata[["sizeFactor"]])
+    sf <- tweedspot_as_numeric(coldata[["sizeFactor"]])
     if (length(sf) == ncol(input) && all(is.finite(sf) | is.na(sf))) {
       return(tweedspot_repair_size_factors(sf))
     }
@@ -10,10 +10,39 @@ tweedspot_libsize <- function(input, Y, assay_name = "counts",
 
   size_factor_method <- match.arg(size_factor_method)
   if (identical(size_factor_method, "scran")) {
-    sf <- scran::computeSumFactors(input, assay.type = assay_name)
-    return(tweedspot_repair_size_factors(as.numeric(sf)))
+    sf <- tryCatch(
+      scran::computeSumFactors(input, assay.type = assay_name),
+      error = function(e) {
+        stop(
+          "SCRAN size factor estimation failed. This often happens when spatial locations ",
+          "have zero library sizes; run `filter_genes(..., drop_zero_spots = TRUE)`, ",
+          "remove zero-count spots, or set `size_factor_method = \"library_size\"`. ",
+          "Original error: ", conditionMessage(e),
+          call. = FALSE
+        )
+      }
+    )
+    return(tweedspot_repair_size_factors(tweedspot_as_numeric(sf)))
   }
   tweedspot_library_size(Y)
+}
+
+tweedspot_as_numeric <- function(x) {
+  if (methods::is(x, "SummarizedExperiment")) {
+    coldata <- SummarizedExperiment::colData(x)
+    if ("sizeFactor" %in% names(coldata)) {
+      x <- coldata[["sizeFactor"]]
+    } else {
+      stop("Could not extract size factors from the object returned by `scran::computeSumFactors()`.")
+    }
+  }
+  if (methods::is(x, "DataFrame") && ncol(x) == 1L) {
+    x <- x[[1L]]
+  }
+  if (methods::is(x, "List") && length(x) == 1L) {
+    x <- x[[1L]]
+  }
+  as.numeric(base::unlist(x, recursive = TRUE, use.names = FALSE))
 }
 
 tweedspot_repair_size_factors <- function(sf) {

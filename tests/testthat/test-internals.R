@@ -22,6 +22,17 @@ test_that("tweedspot_libsize supports total-count library sizes", {
   expect_true(any(libsz == 0))
 })
 
+test_that("tweedspot_as_numeric handles S4 vector-like size factors", {
+  df <- S4Vectors::DataFrame(sizeFactor = S4Vectors::Rle(c(1, NA, 2, 0)))
+  listed <- S4Vectors::List(c(1, 2, 3))
+  spe <- mock_spe()
+  SummarizedExperiment::colData(spe)$sizeFactor <- c(1, 2, 3, 4, 5, 6)
+
+  expect_equal(TweedSpot:::tweedspot_as_numeric(df), c(1, NA, 2, 0))
+  expect_equal(TweedSpot:::tweedspot_as_numeric(listed), c(1, 2, 3))
+  expect_equal(TweedSpot:::tweedspot_as_numeric(spe), c(1, 2, 3, 4, 5, 6))
+})
+
 test_that("tweedspot_check_scalar validates numeric bounds", {
   expect_no_error(TweedSpot:::tweedspot_check_scalar(1, "x", min_value = 0, max_value = 2))
   expect_error(TweedSpot:::tweedspot_check_scalar("a", "x"), "single numeric value")

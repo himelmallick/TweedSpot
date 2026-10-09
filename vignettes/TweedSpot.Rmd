@@ -106,23 +106,27 @@ spe
 
 We now fit TweedSpot on the filtered dataset. For this example object,
 `sample_id` is constant across all retained spots, so we do not include it as a
-covariate. We also use a smaller `smooth_k` to keep the example fast.
+covariate. To keep the vignette fast and robust across build machines, this
+runnable example uses the Poisson mapping (`tweedie_p = 1`), total-count
+library-size offsets, serial execution, and a small `smooth_k`. Estimated
+Tweedie fits with `tweedie_p = NULL` and SCRAN size factors are shown below as
+recommended analysis options for full datasets.
 
 ```{r run-tweedspot}
 
 
-bp <- MulticoreParam(workers = 4)
+bp <- SerialParam()
 
 spe_res <- tweedspot(
   input = spe,
   assay_name = "counts",
   two_part = FALSE,
-  tweedie_p = NULL,
+  tweedie_p = 1,
   fit_method = "REML",
-  use_bam = TRUE,
+  use_bam = FALSE,
   bam_discrete = TRUE,
-  size_factor_method = "scran",
-  smooth_k = 10,
+  size_factor_method = "library_size",
+  smooth_k = 5,
   BPPARAM = bp,
   verbose = TRUE
 )
@@ -156,7 +160,7 @@ contain zeros.
 
 For example, users can fit a fixed Tweedie index:
 
-```{r fixed-tweedie-p}
+```{r fixed-tweedie-p, eval = FALSE}
 spe_res_fixed <- tweedspot(
   input = spe,
   assay_name = "counts",
@@ -185,6 +189,22 @@ spe_res_gaussian <- tweedspot(
 
 The `family` argument remains available for users who want to pass an `mgcv`
 family directly, but `tweedie_p` takes precedence when both are supplied.
+
+For a full analysis, users may prefer the adaptive Tweedie model with SCRAN size
+factors:
+
+```{r adaptive-tweedie-scran, eval = FALSE}
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = NULL,
+  use_bam = TRUE,
+  bam_discrete = TRUE,
+  size_factor_method = "scran",
+  smooth_k = 10,
+  BPPARAM = BiocParallel::bpparam()
+)
+```
 
 # Extract and rank results
 
@@ -223,7 +243,13 @@ pattern and the fitted spatial smooth for a single gene.
 top_gene <- res$gene_name[1]
 
 plot_spatial_gene(spe_res, gene = top_gene)
-plot_spatial_fit(spe_res, gene = top_gene, family = "tw", smooth_k = 10)
+plot_spatial_fit(
+  spe_res,
+  gene = top_gene,
+  tweedie_p = 1,
+  size_factor_method = "library_size",
+  smooth_k = 5
+)
 ```
 
 # Notes
