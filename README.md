@@ -93,6 +93,7 @@ spe_res <- tweedspot(
   fit_method = "REML",
   use_bam = TRUE,
   bam_discrete = TRUE,
+  size_factor_method = "scran",
   smooth_k = 20
 )
 ```
@@ -115,6 +116,77 @@ Key arguments:
 - `two_part`: optional two-part agnostic model
 - `use_bam`: use `mgcv::bam()` for faster fitting on larger datasets
 - `smooth_k`: optional smooth basis size to trade flexibility for speed
+- `size_factor_method`: use `scran` or total-count library-size offsets when
+  `colData(input)$sizeFactor` is not already present
+- `tweedie_p`: optionally select an `mgcv`-supported Tweedie variance power
+  mapping, including estimated Tweedie (`NULL`), Gaussian (`0`), Poisson (`1`),
+  fixed Tweedie powers in `(1, 2]`, or inverse Gaussian (`3`) for strictly
+  positive responses
+
+## Tweedie Index Parameter
+
+TweedSpot uses `mgcv` as its modeling engine, so the supported Tweedie index
+settings follow the families that can be represented cleanly inside
+`mgcv::gam()` and `mgcv::bam()`. The `tweedie_p` argument controls this behavior
+directly.
+
+By default, `tweedie_p = NULL`, which fits an adaptive Tweedie GAM using
+`mgcv::tw()`. In this mode, the Tweedie index is estimated during model fitting.
+This is the recommended default for count-like spatial transcriptomics data
+because it lets each gene adapt to its own mean-variance relationship.
+
+You can also provide fixed values:
+
+| `tweedie_p` | Model family used by TweedSpot | Typical use |
+| --- | --- | --- |
+| `NULL` | `mgcv::tw()` | Estimate the Tweedie index during fitting |
+| `0` | `stats::gaussian()` | Continuous approximately normal outcomes |
+| `1` | `stats::poisson()` | Poisson count model |
+| `1 < p < 2` | `mgcv::Tweedie(p = p)` | Compound Poisson-Gamma Tweedie model with a point mass at zero |
+| `2` | `mgcv::Tweedie(p = 2)` | Gamma boundary case |
+| `3` | `stats::inverse.gaussian()` | Strictly positive continuous outcomes |
+
+Values between `0` and `1`, values between `2` and `3`, negative values, and
+values greater than `3` are not supported in the current `mgcv` implementation
+used by TweedSpot. The inverse Gaussian option (`tweedie_p = 3`) requires
+strictly positive responses, so it is usually not appropriate for raw spatial
+count matrices containing zeros.
+
+Examples:
+
+```r
+# Estimate the Tweedie index per gene
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = NULL
+)
+
+# Fixed compound Poisson-Gamma Tweedie index
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 1.5
+)
+
+# Poisson spatial GAM
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 1
+)
+
+# Gaussian spatial GAM for continuous assays
+spe_res <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 0
+)
+```
+
+The older `family` argument is still available for users who want to pass an
+`mgcv` family directly. When `tweedie_p` is supplied, it takes precedence over
+`family`.
 
 ## Output
 

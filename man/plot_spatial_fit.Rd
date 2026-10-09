@@ -10,11 +10,13 @@ plot_spatial_fit(
   assay_name = "counts",
   covariates = NULL,
   family = "tw",
+  tweedie_p = NULL,
   fit_method = "REML",
   use_bam = FALSE,
   bam_discrete = TRUE,
   bam_nthreads = 1L,
   smooth_k = NULL,
+  size_factor_method = c("scran", "library_size"),
   point_size = 1.8
 )
 }
@@ -30,7 +32,13 @@ spatial coordinates.}
 \code{colData(input)} to adjust for, for example \code{~ batch + age + sex}.
 Character vectors of \code{colData(input)} column names are also supported.}
 
-\item{family}{\code{mgcv} family for the count model. Default \code{"tw"}.}
+\item{family}{\code{mgcv} family for the count model. Default \code{"tw"}. Ignored
+when \code{tweedie_p} is supplied.}
+
+\item{tweedie_p}{Optional Tweedie variance power. If \code{NULL}, TweedSpot
+estimates the Tweedie index with \code{\link[mgcv:tw]{mgcv::tw()}}. Supported fixed values are
+\code{0} for Gaussian, \code{1} for Poisson, values in \verb{(1, 2]} for fixed Tweedie,
+and \code{3} for inverse Gaussian with strictly positive responses.}
 
 \item{fit_method}{Smoothing parameter estimation method passed to \code{mgcv}.
 Default \code{"REML"}.}
@@ -45,6 +53,10 @@ Default \code{TRUE}.}
 
 \item{smooth_k}{Optional basis dimension for the spatial smooth. Default
 \code{NULL}.}
+
+\item{size_factor_method}{Method used to compute library size offsets when
+\code{colData(input)$sizeFactor} is not present. Options are \code{"scran"} and
+\code{"library_size"}. Default \code{"scran"}.}
 
 \item{point_size}{Point size for the scatter plot. Default \code{1.8}.}
 }
@@ -73,5 +85,11 @@ spe <- SpatialExperiment::SpatialExperiment(
   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
 )
-plot_spatial_fit(spe, gene = "gene1", covariates = ~ batch, family = "poisson")
+plot_spatial_fit(
+  spe,
+  gene = "gene1",
+  covariates = ~ batch,
+  family = "poisson",
+  size_factor_method = "library_size"
+)
 }

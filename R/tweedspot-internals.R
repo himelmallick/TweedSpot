@@ -1,13 +1,27 @@
-tweedspot_libsize <- function(input, Y) {
+tweedspot_libsize <- function(input, Y, assay_name = "counts",
+                              size_factor_method = c("scran", "library_size")) {
   coldata <- SummarizedExperiment::colData(input)
   if ("sizeFactor" %in% names(coldata)) {
     sf <- as.numeric(coldata[["sizeFactor"]])
     if (length(sf) == ncol(input) && all(is.finite(sf) | is.na(sf))) {
-      sf[is.na(sf) | sf <= 0] <- 1
-      return(sf)
+      return(tweedspot_repair_size_factors(sf))
     }
   }
 
+  size_factor_method <- match.arg(size_factor_method)
+  if (identical(size_factor_method, "scran")) {
+    sf <- scran::computeSumFactors(input, assay.type = assay_name)
+    return(tweedspot_repair_size_factors(as.numeric(sf)))
+  }
+  tweedspot_library_size(Y)
+}
+
+tweedspot_repair_size_factors <- function(sf) {
+  sf[is.na(sf) | !is.finite(sf) | sf <= 0] <- 1
+  sf
+}
+
+tweedspot_library_size <- function(Y) {
   ls <- colSums(Y)
   med_ls <- stats::median(ls)
   if (!is.finite(med_ls) || med_ls <= 0) {
@@ -258,12 +272,39 @@ tweedspot_covariates <- function(input, covariates) {
   tweedspot_sanitize_covariates(covariate_data, covariate_vars, covariate_terms)
 }
 
+tweedspot_resolve_family <- function(family, tweedie_p = NULL, Y = NULL) {
+  if (is.null(tweedie_p) || length(tweedie_p) == 0L || is.na(tweedie_p)) {
+    if (identical(family, "tw")) {
+      return(mgcv::tw(link = "log"))
+    }
+    return(family)
+  }
+  tweedspot_check_scalar(tweedie_p, "tweedie_p")
+  if (tweedie_p > 0 && tweedie_p < 1) {
+    stop("`tweedie_p` values between 0 and 1 are not supported.")
+  }
+  if (tweedie_p < 0 || tweedie_p > 3 || (tweedie_p > 2 && tweedie_p < 3)) {
+    stop("`tweedie_p` must be one of 0, 1, values in (1, 2], or 3.")
+  }
+  if (identical(tweedie_p, 0)) {
+    return(stats::gaussian(link = "identity"))
+  }
+  if (identical(tweedie_p, 1)) {
+    return(stats::poisson(link = "log"))
+  }
+  if (tweedie_p > 1 && tweedie_p <= 2) {
+    return(mgcv::Tweedie(p = tweedie_p, link = "log"))
+  }
+  if (identical(tweedie_p, 3)) {
+    if (!is.null(Y) && any(Y <= 0, na.rm = TRUE)) {
+      stop("`tweedie_p = 3` uses inverse Gaussian models and requires strictly positive responses.")
+    }
+    return(stats::inverse.gaussian(link = "log"))
+  }
+}
+
 tweedspot_fit <- function(formula, family, data, fit_method, use_bam,
                           bam_discrete, bam_nthreads) {
-  if (identical(family, "tw") && !"package:mgcv" %in% search()) {
-    base::attachNamespace(asNamespace("mgcv"))
-  }
-
   if (use_bam) {
     return(mgcv::bam(
       formula = formula,
@@ -430,12 +471,6 @@ tweedspot_combine_pvalues <- function(M, combine) {
     CCT = vapply(seq_len(nrow(M)), function(i) {
       cct(c(M[i, "pval"], M[i, "plogit"]))
     }, numeric(1)),
-    stouffer = vapply(seq_len(nrow(M)), function(i) {
-      p <- c(M[i, "pval"], M[i, "plogit"])
-      p <- p[!is.na(p)]
-      if (!length(p)) return(NA_real_)
-      1 - stats::pnorm(sum(stats::qnorm(1 - p)) / sqrt(length(p)))
-    }, numeric(1)),
     min = pmin(M[, "pval"], M[, "plogit"], na.rm = TRUE)
   )
 }
@@ -479,7 +514,8 @@ tweedspot_agnostic <- function(Y, coords, libsz, covariates, two_part, combine,
   tweedspot_extract_two_part(M, combine)
 }
 
-tweedspot_prepare_input <- function(input, assay_name, covariates) {
+tweedspot_prepare_input <- function(input, assay_name, covariates,
+                                    size_factor_method) {
   Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
   coords <- scale(SpatialExperiment::spatialCoords(input))
   if (ncol(coords) < 2L) {
@@ -488,7 +524,12 @@ tweedspot_prepare_input <- function(input, assay_name, covariates) {
   list(
     Y = Y,
     coords = coords,
-    libsz = tweedspot_libsize(input, Y),
+    libsz = tweedspot_libsize(
+      input = input,
+      Y = Y,
+      assay_name = assay_name,
+      size_factor_method = size_factor_method
+    ),
     covariates = tweedspot_covariates(input, covariates)
   )
 }
@@ -519,15 +560,25 @@ tweedspot_message_end <- function(verbose, pval) {
 }
 
 tweedspot_prepare_plot_fit_data <- function(input, gene, assay_name, covariates,
-                                            family, fit_method, use_bam,
+                                            family, tweedie_p, fit_method, use_bam,
                                             bam_discrete, bam_nthreads,
-                                            smooth_k) {
+                                            smooth_k, size_factor_method) {
   gene_info <- tweedspot_resolve_gene(input, gene)
   Y <- as.matrix(SummarizedExperiment::assay(input, assay_name))
+  family <- tweedspot_resolve_family(
+    family = family,
+    tweedie_p = tweedie_p,
+    Y = Y[gene_info$index, , drop = FALSE]
+  )
   fit <- tweedspot_fit_single_gene(
     expr = as.numeric(Y[gene_info$index, ]),
     coords = scale(SpatialExperiment::spatialCoords(input)),
-    libsz = tweedspot_libsize(input, Y),
+    libsz = tweedspot_libsize(
+      input = input,
+      Y = Y,
+      assay_name = assay_name,
+      size_factor_method = size_factor_method
+    ),
     covariates = tweedspot_covariates(input, covariates),
     family = family,
     fit_method = fit_method,

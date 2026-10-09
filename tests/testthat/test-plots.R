@@ -54,9 +54,10 @@ test_that("plot_spatial_fit returns a ggplot and supports covariates", {
     gene = "GENE3",
     assay_name = "counts",
     covariates = ~ batch,
-    family = "poisson",
+    tweedie_p = 0,
     use_bam = FALSE,
     smooth_k = 4,
+    size_factor_method = "library_size",
     point_size = 2
   )
 
@@ -74,7 +75,8 @@ test_that("plot_spatial_fit errors when a single-gene fit cannot be obtained", {
       assay_name = "counts",
       family = "poisson",
       use_bam = FALSE,
-      smooth_k = 4
+      smooth_k = 4,
+      size_factor_method = "library_size"
     ),
     "Library sizes could not be computed"
   )

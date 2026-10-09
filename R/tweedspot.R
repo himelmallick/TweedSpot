@@ -13,8 +13,13 @@
 #'   on counts plus a binomial model on presence/absence) and combine the two
 #'   p-values. Default `FALSE`.
 #' @param combine P-value combination rule for the two-part model: `"CCT"`
-#'   (Cauchy), `"stouffer"`, or `"min"`. Default `"CCT"`.
+#'   (Cauchy) or `"min"`. Default `"CCT"`.
 #' @param family `mgcv` family for the count model. Default `"tw"` (Tweedie).
+#'   Ignored when `tweedie_p` is supplied.
+#' @param tweedie_p Optional Tweedie variance power. If `NULL`, TweedSpot
+#'   estimates the Tweedie index with [mgcv::tw()]. Supported fixed values are
+#'   `0` for Gaussian, `1` for Poisson, values in `(1, 2]` for fixed Tweedie,
+#'   and `3` for inverse Gaussian with strictly positive responses.
 #' @param fit_method Smoothing parameter estimation method passed to `mgcv`,
 #'   e.g. `"REML"` (default) or `"GCV.Cp"`.
 #' @param use_bam Logical; use [mgcv::bam()] instead of [mgcv::gam()] for
@@ -25,6 +30,9 @@
 #' @param smooth_k Optional basis dimension for the spatial smooth. Smaller
 #'   values can speed fitting at the cost of flexibility. Default `NULL`, which
 #'   uses `mgcv`'s default.
+#' @param size_factor_method Method used to compute library size offsets when
+#'   `colData(input)$sizeFactor` is not present. Options are `"scran"` and
+#'   `"library_size"`. Default `"scran"`.
 #' @param padj_method Multiple-testing correction passed to [stats::p.adjust()].
 #'   Default `"BY"`.
 #' @param BPPARAM A [BiocParallel::BiocParallelParam] object controlling
@@ -54,32 +62,47 @@
 #'   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
 #'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
 #' )
-#' spe <- tweedspot(spe, family = "poisson", smooth_k = 4, BPPARAM = BiocParallel::SerialParam())
+#' spe <- tweedspot(
+#'   spe,
+#'   family = "poisson",
+#'   smooth_k = 4,
+#'   size_factor_method = "library_size",
+#'   BPPARAM = BiocParallel::SerialParam()
+#' )
 #' SummarizedExperiment::rowData(spe)[, c("tweedspot_stat", "tweedspot_pval")]
 #' @export
 tweedspot <- function(input,
                       assay_name = "counts",
                       covariates = NULL,
                       two_part = FALSE,
-                      combine = c("CCT", "stouffer", "min"),
+                      combine = c("CCT", "min"),
                       family = "tw",
+                      tweedie_p = NULL,
                       fit_method = "REML",
                       use_bam = FALSE,
                       bam_discrete = TRUE,
                       bam_nthreads = 1L,
                       smooth_k = NULL,
+                      size_factor_method = c("scran", "library_size"),
                       padj_method = "BY",
                       BPPARAM = BiocParallel::bpparam(),
                       verbose = TRUE) {
 
   combine <- match.arg(combine)
+  size_factor_method <- match.arg(size_factor_method)
   stopifnot(methods::is(input, "SpatialExperiment"))
   tweedspot_check_flag(verbose, "verbose")
 
   fit_input <- tweedspot_prepare_input(
     input = input,
     assay_name = assay_name,
-    covariates = covariates
+    covariates = covariates,
+    size_factor_method = size_factor_method
+  )
+  family <- tweedspot_resolve_family(
+    family = family,
+    tweedie_p = tweedie_p,
+    Y = fit_input$Y
   )
   tweedspot_message_start(
     verbose = verbose,

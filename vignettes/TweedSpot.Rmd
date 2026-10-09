@@ -117,15 +117,74 @@ spe_res <- tweedspot(
   input = spe,
   assay_name = "counts",
   two_part = FALSE,
-  family = "tw",
+  tweedie_p = NULL,
   fit_method = "REML",
   use_bam = TRUE,
   bam_discrete = TRUE,
+  size_factor_method = "scran",
   smooth_k = 10,
   BPPARAM = bp,
   verbose = TRUE
 )
 ```
+
+# Tweedie index parameter
+
+TweedSpot is built on `mgcv`, so its Tweedie index support follows what can be
+represented as `mgcv` families. The main control is `tweedie_p`.
+
+When `tweedie_p = NULL`, TweedSpot uses `mgcv::tw()` and estimates the Tweedie
+index during fitting. This is the default and recommended setting for raw
+spatial transcriptomics count data because genes can differ substantially in
+their mean-variance relationships.
+
+Fixed values are also supported:
+
+| `tweedie_p` | Family used internally | Interpretation |
+| --- | --- | --- |
+| `NULL` | `mgcv::tw()` | Estimated Tweedie index |
+| `0` | `stats::gaussian()` | Gaussian model for continuous approximately normal outcomes |
+| `1` | `stats::poisson()` | Poisson count model |
+| `1 < p < 2` | `mgcv::Tweedie(p = p)` | Compound Poisson-Gamma Tweedie model |
+| `2` | `mgcv::Tweedie(p = 2)` | Gamma boundary case |
+| `3` | `stats::inverse.gaussian()` | Inverse Gaussian model for strictly positive outcomes |
+
+Values between `0` and `1`, values between `2` and `3`, negative values, and
+values greater than `3` are not supported. The inverse Gaussian case requires
+strictly positive responses, so it should not be used on raw count assays that
+contain zeros.
+
+For example, users can fit a fixed Tweedie index:
+
+```{r fixed-tweedie-p}
+spe_res_fixed <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 1.5,
+  use_bam = TRUE,
+  bam_discrete = TRUE,
+  smooth_k = 10
+)
+```
+
+Or use the Poisson and Gaussian mappings when those assumptions are desired:
+
+```{r alternate-index-settings, eval = FALSE}
+spe_res_poisson <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 1
+)
+
+spe_res_gaussian <- tweedspot(
+  input = spe,
+  assay_name = "counts",
+  tweedie_p = 0
+)
+```
+
+The `family` argument remains available for users who want to pass an `mgcv`
+family directly, but `tweedie_p` takes precedence when both are supplied.
 
 # Extract and rank results
 
@@ -172,7 +231,9 @@ plot_spatial_fit(spe_res, gene = top_gene, family = "tw", smooth_k = 10)
 - Covariates are specified from `colData(input)` using a one-sided formula such
   as `~ batch + age + sex`.
 - If `colData(input)$sizeFactor` is present, TweedSpot uses it as the library
-  size adjustment. Otherwise, it falls back to total-count scaling.
+  size adjustment. Otherwise, `size_factor_method = "scran"` estimates size
+  factors with `scran::computeSumFactors()`. Users can set
+  `size_factor_method = "library_size"` for total-count scaling.
 - `filter_genes()` can optionally report how many genes and spots were retained
   and how many were removed by each criterion.
 - `tweedspot()` can print lightweight progress messages through

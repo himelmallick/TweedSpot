@@ -8,6 +8,7 @@
 #' additive models.
 #'
 #' @importFrom S4Vectors DataFrame
+#' @importFrom scran computeSumFactors
 #' @keywords internal
 #' @name TweedSpot-package
 "_PACKAGE"

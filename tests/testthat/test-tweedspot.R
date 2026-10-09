@@ -19,6 +19,7 @@ test_that("tweedspot returns result columns for a small dataset", {
     family = "poisson",
     use_bam = FALSE,
     smooth_k = 4,
+    size_factor_method = "library_size",
     BPPARAM = BiocParallel::SerialParam(),
     verbose = FALSE
   )
@@ -43,11 +44,48 @@ test_that("tweedspot rejects constant covariates", {
       assay_name = "counts",
       covariates = ~ constant,
       family = "poisson",
+      size_factor_method = "library_size",
       BPPARAM = BiocParallel::SerialParam(),
       verbose = FALSE
     ),
     "must vary across spatial locations"
   )
+})
+
+test_that("tweedspot supports gaussian and fixed Tweedie p mappings", {
+  counts <- matrix(
+    c(
+      1, 2, 3, 4, 5, 6,
+      2, 3, 4, 5, 6, 7
+    ),
+    nrow = 2,
+    byrow = TRUE
+  )
+  spe <- mock_spe(counts)
+
+  gaussian_fit <- tweedspot(
+    input = spe,
+    assay_name = "counts",
+    tweedie_p = 0,
+    use_bam = FALSE,
+    smooth_k = 4,
+    size_factor_method = "library_size",
+    BPPARAM = BiocParallel::SerialParam(),
+    verbose = FALSE
+  )
+  fixed_tweedie_fit <- suppressWarnings(tweedspot(
+    input = spe,
+    assay_name = "counts",
+    tweedie_p = 1.5,
+    use_bam = FALSE,
+    smooth_k = 4,
+    size_factor_method = "library_size",
+    BPPARAM = BiocParallel::SerialParam(),
+    verbose = FALSE
+  ))
+
+  expect_true("tweedspot_pval" %in% colnames(SummarizedExperiment::rowData(gaussian_fit)))
+  expect_true("tweedspot_pval" %in% colnames(SummarizedExperiment::rowData(fixed_tweedie_fit)))
 })
 
 test_that("tweedspot errors on non-positive library sizes", {
@@ -59,6 +97,7 @@ test_that("tweedspot errors on non-positive library sizes", {
       input = spe,
       assay_name = "counts",
       family = "poisson",
+      size_factor_method = "library_size",
       BPPARAM = BiocParallel::SerialParam(),
       verbose = FALSE
     ),

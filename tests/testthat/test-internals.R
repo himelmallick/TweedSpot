@@ -3,9 +3,23 @@ test_that("tweedspot_libsize uses sizeFactor when present and repairs bad values
   Y <- as.matrix(SummarizedExperiment::assay(spe, "counts"))
   SummarizedExperiment::colData(spe)$sizeFactor <- c(1, NA, 2, 0, 3, 4)
 
-  libsz <- TweedSpot:::tweedspot_libsize(spe, Y)
+  libsz <- TweedSpot:::tweedspot_libsize(spe, Y, size_factor_method = "scran")
 
   expect_equal(libsz, c(1, 1, 2, 1, 3, 4))
+})
+
+test_that("tweedspot_libsize supports total-count library sizes", {
+  spe <- mock_spe()
+  Y <- as.matrix(SummarizedExperiment::assay(spe, "counts"))
+
+  libsz <- TweedSpot:::tweedspot_libsize(
+    spe,
+    Y,
+    size_factor_method = "library_size"
+  )
+
+  expect_true(all(is.finite(libsz)))
+  expect_true(any(libsz == 0))
 })
 
 test_that("tweedspot_check_scalar validates numeric bounds", {
@@ -94,6 +108,36 @@ test_that("covariate parsing rejects invalid inputs", {
   expect_error(TweedSpot:::tweedspot_covariates(spe_reserved, ~ expr), "reserved names")
 })
 
+test_that("tweedie_p resolves to mgcv-supported model families", {
+  positive_counts <- matrix(
+    c(1, 2, 3, 4, 2, 3, 4, 5),
+    nrow = 2,
+    byrow = TRUE
+  )
+
+  expect_s3_class(TweedSpot:::tweedspot_resolve_family("tw", NULL), "extended.family")
+  expect_equal(TweedSpot:::tweedspot_resolve_family("tw", 0)$family, "gaussian")
+  expect_equal(TweedSpot:::tweedspot_resolve_family("tw", 1)$family, "poisson")
+  expect_equal(TweedSpot:::tweedspot_resolve_family("tw", 1.5)$family, "Tweedie(1.5)")
+  expect_equal(TweedSpot:::tweedspot_resolve_family("tw", 2)$family, "Tweedie(2)")
+  expect_equal(
+    TweedSpot:::tweedspot_resolve_family("tw", 3, Y = positive_counts)$family,
+    "inverse.gaussian"
+  )
+  expect_error(
+    TweedSpot:::tweedspot_resolve_family("tw", 0.5),
+    "between 0 and 1"
+  )
+  expect_error(
+    TweedSpot:::tweedspot_resolve_family("tw", 2.5),
+    "must be one of"
+  )
+  expect_error(
+    TweedSpot:::tweedspot_resolve_family("tw", 3, Y = matrix(c(0, 1), nrow = 1)),
+    "strictly positive"
+  )
+})
+
 test_that("gene resolution and coordinate helpers validate inputs", {
   spe <- mock_spe()
 
@@ -134,7 +178,11 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
   spe <- mock_spe(counts)
   Y <- as.matrix(SummarizedExperiment::assay(spe, "counts"))
   coords <- scale(SpatialExperiment::spatialCoords(spe))
-  libsz <- TweedSpot:::tweedspot_libsize(spe, Y)
+  libsz <- TweedSpot:::tweedspot_libsize(
+    spe,
+    Y,
+    size_factor_method = "library_size"
+  )
   covariates <- TweedSpot:::tweedspot_covariates(spe, ~ batch)
 
   fit <- TweedSpot:::tweedspot_fit_single_gene(
@@ -177,7 +225,7 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
       libsz = libsz,
       covariates = covariates,
       two_part = TRUE,
-      combine = "stouffer",
+      combine = "CCT",
       family = "poisson",
       fit_method = "REML",
       use_bam = FALSE,

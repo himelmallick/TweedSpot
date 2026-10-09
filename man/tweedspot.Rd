@@ -9,13 +9,15 @@ tweedspot(
   assay_name = "counts",
   covariates = NULL,
   two_part = FALSE,
-  combine = c("CCT", "stouffer", "min"),
+  combine = c("CCT", "min"),
   family = "tw",
+  tweedie_p = NULL,
   fit_method = "REML",
   use_bam = FALSE,
   bam_discrete = TRUE,
   bam_nthreads = 1L,
   smooth_k = NULL,
+  size_factor_method = c("scran", "library_size"),
   padj_method = "BY",
   BPPARAM = BiocParallel::bpparam(),
   verbose = TRUE
@@ -36,9 +38,15 @@ on counts plus a binomial model on presence/absence) and combine the two
 p-values. Default \code{FALSE}.}
 
 \item{combine}{P-value combination rule for the two-part model: \code{"CCT"}
-(Cauchy), \code{"stouffer"}, or \code{"min"}. Default \code{"CCT"}.}
+(Cauchy) or \code{"min"}. Default \code{"CCT"}.}
 
-\item{family}{\code{mgcv} family for the count model. Default \code{"tw"} (Tweedie).}
+\item{family}{\code{mgcv} family for the count model. Default \code{"tw"} (Tweedie).
+Ignored when \code{tweedie_p} is supplied.}
+
+\item{tweedie_p}{Optional Tweedie variance power. If \code{NULL}, TweedSpot
+estimates the Tweedie index with \code{\link[mgcv:tw]{mgcv::tw()}}. Supported fixed values are
+\code{0} for Gaussian, \code{1} for Poisson, values in \verb{(1, 2]} for fixed Tweedie,
+and \code{3} for inverse Gaussian with strictly positive responses.}
 
 \item{fit_method}{Smoothing parameter estimation method passed to \code{mgcv},
 e.g. \code{"REML"} (default) or \code{"GCV.Cp"}.}
@@ -54,6 +62,10 @@ via \code{mgcv::bam(discrete = TRUE)} for speed. Default \code{TRUE}.}
 \item{smooth_k}{Optional basis dimension for the spatial smooth. Smaller
 values can speed fitting at the cost of flexibility. Default \code{NULL}, which
 uses \code{mgcv}'s default.}
+
+\item{size_factor_method}{Method used to compute library size offsets when
+\code{colData(input)$sizeFactor} is not present. Options are \code{"scran"} and
+\code{"library_size"}. Default \code{"scran"}.}
 
 \item{padj_method}{Multiple-testing correction passed to \code{\link[stats:p.adjust]{stats::p.adjust()}}.
 Default \code{"BY"}.}
@@ -91,6 +103,12 @@ spe <- SpatialExperiment::SpatialExperiment(
   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
 )
-spe <- tweedspot(spe, family = "poisson", smooth_k = 4, BPPARAM = BiocParallel::SerialParam())
+spe <- tweedspot(
+  spe,
+  family = "poisson",
+  smooth_k = 4,
+  size_factor_method = "library_size",
+  BPPARAM = BiocParallel::SerialParam()
+)
 SummarizedExperiment::rowData(spe)[, c("tweedspot_stat", "tweedspot_pval")]
 }

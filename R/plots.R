@@ -91,7 +91,12 @@ plot_spatial_gene <- function(input,
 #' @param covariates Optional one-sided formula specifying columns from
 #'   `colData(input)` to adjust for, for example `~ batch + age + sex`.
 #'   Character vectors of `colData(input)` column names are also supported.
-#' @param family `mgcv` family for the count model. Default `"tw"`.
+#' @param family `mgcv` family for the count model. Default `"tw"`. Ignored
+#'   when `tweedie_p` is supplied.
+#' @param tweedie_p Optional Tweedie variance power. If `NULL`, TweedSpot
+#'   estimates the Tweedie index with [mgcv::tw()]. Supported fixed values are
+#'   `0` for Gaussian, `1` for Poisson, values in `(1, 2]` for fixed Tweedie,
+#'   and `3` for inverse Gaussian with strictly positive responses.
 #' @param fit_method Smoothing parameter estimation method passed to `mgcv`.
 #'   Default `"REML"`.
 #' @param use_bam Logical; use [mgcv::bam()] instead of [mgcv::gam()]. Default
@@ -101,6 +106,9 @@ plot_spatial_gene <- function(input,
 #' @param bam_nthreads Integer; number of threads for `mgcv::bam()`. Default 1.
 #' @param smooth_k Optional basis dimension for the spatial smooth. Default
 #'   `NULL`.
+#' @param size_factor_method Method used to compute library size offsets when
+#'   `colData(input)$sizeFactor` is not present. Options are `"scran"` and
+#'   `"library_size"`. Default `"scran"`.
 #' @param point_size Point size for the scatter plot. Default `1.8`.
 #'
 #' @return A `ggplot2` object.
@@ -122,23 +130,32 @@ plot_spatial_gene <- function(input,
 #'   colData = S4Vectors::DataFrame(batch = rep(c("A", "B"), length.out = ncol(counts))),
 #'   spatialCoords = cbind(x = seq_len(ncol(counts)), y = seq_len(ncol(counts)))
 #' )
-#' plot_spatial_fit(spe, gene = "gene1", covariates = ~ batch, family = "poisson")
+#' plot_spatial_fit(
+#'   spe,
+#'   gene = "gene1",
+#'   covariates = ~ batch,
+#'   family = "poisson",
+#'   size_factor_method = "library_size"
+#' )
 #' @export
 plot_spatial_fit <- function(input,
                              gene,
                              assay_name = "counts",
                              covariates = NULL,
                              family = "tw",
+                             tweedie_p = NULL,
                              fit_method = "REML",
                              use_bam = FALSE,
                              bam_discrete = TRUE,
                              bam_nthreads = 1L,
                              smooth_k = NULL,
+                             size_factor_method = c("scran", "library_size"),
                              point_size = 1.8) {
   stopifnot(methods::is(input, "SpatialExperiment"))
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop("`plot_spatial_fit()` requires the `ggplot2` package.")
   }
+  size_factor_method <- match.arg(size_factor_method)
   tweedspot_check_scalar(point_size, "point_size", min_value = 0)
 
   fit_data <- tweedspot_prepare_plot_fit_data(
@@ -147,11 +164,13 @@ plot_spatial_fit <- function(input,
     assay_name = assay_name,
     covariates = covariates,
     family = family,
+    tweedie_p = tweedie_p,
     fit_method = fit_method,
     use_bam = use_bam,
     bam_discrete = bam_discrete,
     bam_nthreads = bam_nthreads,
-    smooth_k = smooth_k
+    smooth_k = smooth_k,
+    size_factor_method = size_factor_method
   )
 
   ggplot2::ggplot(fit_data$df, ggplot2::aes(x = x, y = y, color = value)) +
