@@ -15,13 +15,23 @@ spanorm_spe <- function(seed = 1) {
   )
 }
 
+# SpaNorm's internal SVD warns on this deliberately tiny test dataset; those
+# warnings are expected here and silenced so they do not mask real ones.
+quiet_spanorm <- function(expr) {
+  withCallingHandlers(expr, warning = function(w) {
+    if (grepl("singular values|standard svd|did not converge", conditionMessage(w))) {
+      invokeRestart("muffleWarning")
+    }
+  })
+}
+
 # Fit SpaNorm once and cache it in the metadata; later calls reuse the fit.
 spanorm_cached_spe <- local({
   cache <- NULL
   function() {
     if (is.null(cache)) {
       spe <- spanorm_spe()
-      sn <- tweedspot_run_spanorm(spe, seed = 1)
+      sn <- quiet_spanorm(tweedspot_run_spanorm(spe, seed = 1))
       S4Vectors::metadata(spe)$SpaNorm <- sn$fit
       S4Vectors::metadata(spe)$SpaNorm_fingerprint <- sn$fingerprint
       cache <<- spe
@@ -85,10 +95,10 @@ test_that("tweedspot runs with both SpaNorm outputs and caches the fit", {
 test_that("a user-supplied adj.method is ignored with a warning", {
   skip_if_not_installed("SpaNorm")
   spe <- spanorm_cached_spe()
-  expect_warning(
+  quiet_spanorm(expect_warning(
     tweedspot_run_spanorm(spe, spanorm_args = list(adj.method = "pearson"), seed = 1),
     "adj.method"
-  )
+  ))
 })
 
 test_that("a cached SpaNorm fit is reused only for the same data, settings and seed", {
@@ -114,16 +124,17 @@ test_that("a cached SpaNorm fit is reused only for the same data, settings and s
 })
 
 test_that("the seed makes runs reproducible and restores the caller's RNG", {
+  draw <- function(seed) {
+    tweedspot_local_seed(seed)
+    stats::runif(3)
+  }
   set.seed(5)
   before <- .Random.seed
-  restore <- tweedspot_set_seed(1)
-  a <- stats::runif(3)
-  restore()
+  a <- draw(1)
   expect_identical(.Random.seed, before)
-  restore <- tweedspot_set_seed(1)
-  b <- stats::runif(3)
-  restore()
-  expect_identical(a, b)
-  expect_error(tweedspot_set_seed(1.5), "whole number")
-  expect_error(tweedspot_set_seed("a"), "whole number")
+  expect_identical(draw(1), a)
+  expect_false(identical(draw(2), a))
+  expect_null(tweedspot_local_seed(NULL))
+  expect_error(draw(1.5), "whole number")
+  expect_error(draw("a"), "whole number")
 })

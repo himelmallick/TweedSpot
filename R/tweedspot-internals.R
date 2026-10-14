@@ -34,7 +34,7 @@ tweedspot_libsize <- function(input, Y, assay_name = "counts",
           "SCRAN size factor estimation failed. This often happens when spatial locations ",
           "have zero library sizes; run `filter_features(..., drop_empty_locations = TRUE)`, ",
           "remove zero-count spots, or set `size_factor_method = \"library_size\"`. ",
-          "Original error: ", conditionMessage(e),
+          "Details: ", conditionMessage(e),
           call. = FALSE
         )
       }
@@ -100,8 +100,7 @@ tweedspot_run_spanorm <- function(input, assay_name = "counts",
   spanorm_args$spe <- NULL
 
   fingerprint <- tweedspot_spanorm_fingerprint(input, assay_name, spanorm_args, seed)
-  restore_rng <- tweedspot_set_seed(seed)
-  on.exit(restore_rng(), add = TRUE)
+  tweedspot_local_seed(seed)
   md <- S4Vectors::metadata(input)
   reusable <- !is.null(md$SpaNorm) && identical(md$SpaNorm_fingerprint, fingerprint) &&
     tweedspot_spanorm_fit_matches(md$SpaNorm, input)
@@ -120,14 +119,23 @@ tweedspot_run_spanorm <- function(input, assay_name = "counts",
   }
   args <- c(list(spe = spe, adj.method = "logpac", verbose = FALSE), spanorm_args)
   spe <- tryCatch(
-    suppressWarnings(do.call(SpaNorm::SpaNorm, args)),
+    withCallingHandlers(
+      do.call(SpaNorm::SpaNorm, args),
+      warning = function(w) {
+        # SpaNorm warns that it overwrites `logcounts` on its own temporary
+        # copy; that is expected here. Other warnings are passed on.
+        if (grepl("'logcounts' exists", conditionMessage(w), fixed = TRUE)) {
+          invokeRestart("muffleWarning")
+        }
+      }
+    ),
     error = function(e) {
-      stop("SpaNorm model fitting failed: ", conditionMessage(e),
-           if (grepl("singular", conditionMessage(e))) {
-             paste0(" This often happens with few locations; try ",
-                    "`spanorm_args = list(sample.p = 1)` or a different `seed`.")
-           },
-           call. = FALSE)
+      hint <- if (grepl("singular", conditionMessage(e))) {
+        " This often happens with few locations; try `spanorm_args = list(sample.p = 1)` or a different `seed`."
+      } else {
+        ""
+      }
+      stop("SpaNorm model fitting failed: ", conditionMessage(e), hint, call. = FALSE)
     }
   )
   fit <- S4Vectors::metadata(spe)$SpaNorm
@@ -228,7 +236,7 @@ tweedspot_check_flag <- function(x, name) {
 
 tweedspot_order_results <- function(res, key_col, decreasing = FALSE) {
   key <- res[[key_col]]
-  stat <- res[["tweedspot_stat"]]
+  stat <- res[["stat"]]
   if (decreasing) {
     ord <- order(is.na(key), -key, is.na(stat), -stat)
   } else {
@@ -802,12 +810,26 @@ tweedspot_fit_auto <- function(formula, data, fit_method, use_bam, bam_discrete,
                                bam_nthreads, p_criterion = "BIC") {
   expr <- data[[all.vars(formula)[1L]]]
   cands <- tweedspot_auto_candidates(expr)
+  # Candidate families that do not suit the data often fail to converge; their
+  # warnings are recorded rather than shown, and only the warnings of the
+  # selected fit are passed on.
   fits <- lapply(cands, function(fam) {
-    tryCatch(
-      suppressWarnings(tweedspot_fit(formula, fam, data, fit_method, use_bam,
-                                     bam_discrete, bam_nthreads)),
+    caught <- new.env(parent = emptyenv())
+    caught$messages <- character(0)
+    fit <- tryCatch(
+      withCallingHandlers(
+        tweedspot_fit(formula, fam, data, fit_method, use_bam, bam_discrete, bam_nthreads),
+        warning = function(w) {
+          caught$messages <- c(caught$messages, conditionMessage(w))
+          invokeRestart("muffleWarning")
+        }
+      ),
       error = function(e) NULL
     )
+    if (!is.null(fit)) {
+      attr(fit, "tweedspot_warnings") <- unique(caught$messages)
+    }
+    fit
   })
   ic <- vapply(fits, function(f) {
     if (is.null(f)) Inf else tweedspot_information_criterion(f, p_criterion)
@@ -817,6 +839,10 @@ tweedspot_fit_auto <- function(formula, data, fit_method, use_bam, bam_discrete,
   }
   best <- which.min(ic)
   fit <- fits[[best]]
+  for (msg in attr(fit, "tweedspot_warnings")) {
+    warning(msg, call. = FALSE)
+  }
+  attr(fit, "tweedspot_warnings") <- NULL
   attr(fit, "tweedspot_ic") <- ic
   attr(fit, "tweedspot_selected") <- names(cands)[best]
   fit
@@ -1068,9 +1094,10 @@ tweedspot_model_coords <- function(input) {
   }
   if (ncol(coords) > 2L) {
     warning("`spatialCoords(input)` has ", ncol(coords), " columns; TweedSpot uses the ",
-            "first two (", paste(colnames(coords)[1:2], collapse = ", "), ").", call. = FALSE)
+            "first two (", paste(colnames(coords)[seq_len(2L)], collapse = ", "), ").",
+            call. = FALSE)
   }
-  xy <- coords[, 1:2, drop = FALSE]
+  xy <- coords[, seq_len(2L), drop = FALSE]
   storage.mode(xy) <- "double"
   missing <- !stats::complete.cases(xy)
   if (any(missing)) {
@@ -1146,26 +1173,18 @@ tweedspot_prepare_input <- function(input, assay_name, covariates,
   )
 }
 
-# Set the random seed for the duration of a call and return a function that
-# restores the caller's random-number state afterwards.
-tweedspot_set_seed <- function(seed) {
+# Validate `seed` and, when it is given, seed the random-number generator for
+# the rest of the calling function. withr::local_seed() restores the caller's
+# random-number state when that function exits.
+tweedspot_local_seed <- function(seed, envir = parent.frame()) {
   if (is.null(seed)) {
-    return(function() invisible(NULL))
+    return(invisible(NULL))
   }
   if (!is.numeric(seed) || length(seed) != 1L || is.na(seed) || seed != round(seed)) {
     stop("`seed` must be NULL or a single whole number.")
   }
-  had_seed <- exists(".Random.seed", envir = globalenv(), inherits = FALSE)
-  old_seed <- if (had_seed) get(".Random.seed", envir = globalenv()) else NULL
-  set.seed(seed)
-  function() {
-    if (had_seed) {
-      assign(".Random.seed", old_seed, envir = globalenv())
-    } else if (exists(".Random.seed", envir = globalenv(), inherits = FALSE)) {
-      rm(".Random.seed", envir = globalenv())
-    }
-    invisible(NULL)
-  }
+  withr::local_seed(seed, .local_envir = envir)
+  invisible(NULL)
 }
 
 # Remove every result a previous tweedspot() run wrote, so each run starts clean.

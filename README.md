@@ -1,287 +1,354 @@
 # TweedSpot
 
-TweedSpot is an R package for detecting spatially variable genes (SVGs) in
-spatial omics data with spatial generalized additive models using a Tweedie
-count family.
+**Spatially variable feature detection with Tweedie generalized additive models**
 
-TweedSpot is designed for the broader spatial transcriptomics community, where
-users often want methods that model count data directly, remain flexible across
-different spatial expression patterns, and integrate cleanly with established
-analysis workflows. We are submitting TweedSpot to Bioconductor because we
-think it can be broadly useful as a community-facing method for reproducible
-SVG discovery, benchmarking, and downstream biological interpretation.
+TweedSpot finds features (genes, proteins, peaks, metabolites) whose abundance
+varies smoothly across a tissue. Each feature is fitted with a spatial
+generalized additive model (GAM) in [`mgcv`](https://cran.r-project.org/package=mgcv):
+
+```
+E[y_i] = mu_i,   log(mu_i) = s(x_i, y_i) + covariates_i + log(size factor_i)
+y_i ~ Tweedie(mu_i, phi, p)
+```
+
+The spatial smooth `s(x, y)` is tested against a flat surface, so a small
+p-value means the feature is spatially structured after accounting for
+sequencing depth and any covariates you supply. The Tweedie family covers
+counts with many zeros (1 < p < 2) and continuous positive measurements, so
+the same model works on raw counts, normalized intensities, and other
+non-negative assays without transformation.
+
+TweedSpot works on `SpatialExperiment` objects and writes its results back
+into them, so it fits into standard Bioconductor workflows.
+
+## Highlights
+
+- **Models data on its own scale.** Raw counts are modeled directly with a
+  size-factor offset; no log-transform or variance-stabilization step.
+- **Adapts to each feature.** The Tweedie power `p` is estimated per feature,
+  or chosen among Gaussian, Tweedie, Gamma, and inverse Gaussian by BIC/AIC
+  with `tweedie_p = "auto"`.
+- **Cell-type-specific testing.** With `group = "cell_type"`, each feature is
+  tested for spatial variation *within* each cell type, so a marker that only
+  reflects where that cell type sits is not called.
+- **Modality-agnostic filtering.** `filter_features()` removes features the
+  spatial model cannot support and low-quality locations, with optional
+  mitochondrial and ribosomal gene removal for transcriptomics.
+- **Publication-ready figures.** `plot_feature()` and `plot_top_features()`
+  draw observed signal, fitted surface, and spatial effect, and save PDF, PNG,
+  SVG, or TIFF files.
+- **Scales to large data.** Sparse and `DelayedArray` assays, `mgcv::bam()`
+  fitting, and parallel execution through `BiocParallel`.
+- **Reproducible.** One `seed` argument controls all random steps and is
+  reused by the plotting functions.
 
 ## Installation
 
-Once TweedSpot is available through Bioconductor, the release version can be
-installed with `BiocManager`:
+From Bioconductor (once released):
 
 ```r
-install.packages("BiocManager")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
 BiocManager::install("TweedSpot")
 ```
 
-The development version is currently available from GitHub:
+Development version from GitHub:
 
 ```r
-install.packages("remotes")
-remotes::install_github("himelmallick/TweedSpot", dependencies = TRUE)
+BiocManager::install("himelmallick/TweedSpot", dependencies = TRUE)
+# or: remotes::install_github("himelmallick/TweedSpot", dependencies = TRUE)
 ```
 
-If you need to install core Bioconductor dependencies separately, you can use:
+TweedSpot requires R (>= 4.6.0). Optional packages, needed only for the
+matching feature:
 
-```r
-install.packages("BiocManager")
-BiocManager::install(c(
-  "SpatialExperiment",
-  "SummarizedExperiment",
-  "BiocParallel",
-  "STexampleData"
-))
-```
+| Package | Needed for |
+| --- | --- |
+| `SpaNorm` | `size_factor_method = "spanorm"` |
+| `ggplot2`, `patchwork` | `plot_feature()`, `plot_top_features()` |
+| `svglite` | saving figures as SVG |
+| `STexampleData` | example datasets used below and in the vignette |
 
-## Quick Start
+## Quick start
 
 ```r
 library(TweedSpot)
 library(SpatialExperiment)
 library(STexampleData)
 
+# 10x Visium, human dorsolateral prefrontal cortex
 spe <- Visium_humanDLPFC()
 spe <- spe[, colData(spe)$in_tissue == 1]
 
-spe_res <- tweedspot(
-  input = spe,
-  assay_name = "counts"
-)
+# 1. Keep features the spatial model can support
+spe <- filter_features(spe, smooth_k = 20, exclude_mito = TRUE, report = TRUE)
 
-head(SummarizedExperiment::rowData(spe_res)[, c(
-  "tweedspot_stat",
-  "tweedspot_pval",
-  "tweedspot_padj",
-  "tweedspot_edf",
-  "tweedspot_dev_expl"
-)])
+# 2. Fit one spatial GAM per feature
+spe <- tweedspot(spe, smooth_k = 20, seed = 1)
+
+# 3. Look at the strongest spatial features
+top_spatial_genes(spe, n = 10)
+
+# 4. Plot one of them
+plot_feature(spe, "MBP")
 ```
 
-## Example With Filtering
+`top_spatial_genes()` and `get_tweedspot_results()` return a plain data frame,
+one row per feature, sorted by adjusted p-value:
+
+```
+  feature         feature_name   stat    pval        padj        edf   dev_expl
+1 ENSG00000197971 MBP            2841.6  0           0           17.9  0.612
+2 ENSG00000123560 PLP1           2310.4  0           0           17.6  0.548
+3 ENSG00000131095 GFAP           1102.7  1.2e-220    3.1e-217    16.8  0.341
+...
+```
+
+(Values are illustrative.)
+
+## Workflow in detail
+
+### 1. Input
+
+TweedSpot expects a `SpatialExperiment` with
+
+- an assay of non-negative values (`assay_name`, default `"counts"`), which
+  may be a dense matrix, a sparse `dgCMatrix`, or a `DelayedArray`;
+- two spatial coordinates in `spatialCoords()`. Coordinates are scaled by one
+  common factor, so the shape of the tissue is kept;
+- optionally, covariates in `colData()` and a precomputed
+  `colData()$sizeFactor`.
+
+### 2. Filtering with `filter_features()`
+
+`filter_features()` removes features and locations that would only add noise
+or fail to fit. Its thresholds are written in modality-neutral terms.
+
+| Argument | Default | What it does |
+| --- | --- | --- |
+| `min_total` | `5` | Minimum total signal across all locations |
+| `min_pct_locations` | `5` | Minimum percent of locations where the feature is detected |
+| `min_locations` | `0` | Minimum number of locations where the feature is detected |
+| `min_mean`, `min_var` | `0` | Minimum mean and variance |
+| `model_aware` + `smooth_k` | `TRUE`, `NULL` | Require at least as many detected locations as the spatial basis has coefficients, so every kept feature can be fitted |
+| `exclude`, `exclude_pattern` | `NULL` | Drop named features, for example negative-control probes (`"^NegPrb"`) |
+| `exclude_mito`, `exclude_ribo` | `FALSE` | Transcriptomics only: drop mitochondrial / ribosomal genes |
+| `min_total_per_location`, `min_features_per_location` | `0` | Location QC thresholds |
+| `outlier_nmads` | `NULL` | Drop locations that are outliers by this many MADs |
+| `max_excluded_fraction` | `NULL` | Drop locations dominated by excluded features (for example >20% mitochondrial) |
+| `group`, `min_group_size` | `NULL`, `50` | Check model support within each cell type, for group-mode runs |
+| `action` | `"drop"` | `"flag"` keeps everything and adds `filter_keep` / `filter_reason` columns |
+| `report` | `FALSE` | Print a summary of what was removed and why |
 
 ```r
-library(TweedSpot)
-library(SpatialExperiment)
-library(STexampleData)
+# Inspect before removing anything
+flagged <- filter_features(spe, smooth_k = 20, exclude_mito = TRUE,
+                           outlier_nmads = 3, action = "flag")
+table(rowData(flagged)$filter_reason)
+```
 
-spe <- Visium_humanDLPFC()
-spe <- spe[, colData(spe)$in_tissue == 1]
+Use the same `smooth_k` here and in `tweedspot()`, so the support check matches
+the model you will fit.
 
-spe <- filter_features(
+### 3. Normalization
+
+Sequencing depth enters the model as an offset, `log(size factor)`, so counts
+stay on their original scale.
+
+| `size_factor_method` | Description |
+| --- | --- |
+| `"scran"` (default) | Pooling-based deconvolution size factors from `scran::computeSumFactors()` |
+| `"library_size"` | Total signal per location, scaled to a median of one |
+| `"spanorm"` | Spatially aware normalization with [SpaNorm](https://bioconductor.org/packages/SpaNorm), for spatial transcriptomics |
+
+If `colData(spe)$sizeFactor` already exists, `"scran"` and `"library_size"` use
+it as it is, so you can supply size factors from any method.
+
+SpaNorm can enter in two ways: as gene- and location-specific size factors on
+raw counts (`spanorm_output = "size_factor"`, default), or by modeling its
+percentile-adjusted counts (`spanorm_output = "counts"`). The SpaNorm fit is
+cached in `metadata(spe)$SpaNorm` and reused when the data and settings match.
+
+> **Caution.** TweedSpot treats the SpaNorm estimate as known. When library
+> size itself varies across the tissue, this can make the spatial test
+> anti-conservative. Treat SpaNorm results as exploratory and check
+> calibration on your data.
+
+### 4. Model
+
+```r
+spe <- tweedspot(
   spe,
-  min_total = 5,
-  min_pct_locations = 5,
-  min_locations = 3,
-  min_mean = 0.1,
-  smooth_k = 20,                # same basis size as tweedspot() below
-  exclude_mito = TRUE,          # transcriptomics only
-  max_excluded_fraction = 0.2,  # drop locations with >20% mitochondrial signal
-  outlier_nmads = 3,            # drop low-quality locations
-  report = TRUE
-)
-
-spe_res <- tweedspot(
-  input = spe,
   assay_name = "counts",
-  two_part = FALSE,
-  family = "tw",
-  fit_method = "REML",
-  use_bam = TRUE,
-  bam_discrete = TRUE,
+  covariates = ~ batch,        # optional colData() variables
+  tweedie_p = NULL,            # estimate p per feature (default)
+  smooth_k = 20,               # spatial basis size
+  use_bam = TRUE,              # faster fitting for large data
   size_factor_method = "scran",
-  smooth_k = 20
+  padj_method = "BY",
+  seed = 1,
+  BPPARAM = BiocParallel::MulticoreParam(4)
 )
 ```
 
-## Main Functions
+**Variance power.** `tweedie_p` sets the mean-variance relationship,
+`Var(y) = phi * mu^p`:
 
-TweedSpot currently exposes the following user-facing functions:
+| `tweedie_p` | Family | Typical use |
+| --- | --- | --- |
+| `NULL` (default) | `mgcv::tw()`, `p` estimated in (1, 2) | Counts with excess zeros |
+| `"auto"` | Lowest BIC (or AIC, `p_criterion = "AIC"`) among Gaussian, Tweedie, Gamma, inverse Gaussian | Let each feature choose |
+| `0` | Gaussian, log link | Continuous, roughly normal |
+| `1` | Poisson | Counts without overdispersion |
+| `1 < p < 2` | Fixed-power Tweedie | Counts with a chosen power |
+| `2` | Gamma | Strictly positive continuous |
+| `3` | Inverse Gaussian | Strictly positive, heavily skewed |
 
-- `filter_features()`: remove or flag low-information features (genes,
-  proteins, peaks, metabolites), features with too few detected locations to
-  support the spatial smooth, named controls, and low-quality locations;
-  `action = "flag"` annotates instead of dropping. Mitochondrial and ribosomal
-  gene removal is available for transcriptomics
-- `get_tweedspot_results()`: extract and sort TweedSpot results from `rowData()`
-- `top_spatial_genes()`: return the top-ranked spatially variable genes
-- `tweedspot()`: run spatially variable gene detection on a
-  `SpatialExperiment`
-- `plot_feature()`: observed signal, TweedSpot fit, and fitted spatial effect
-  for one feature, refitted with the settings of the `tweedspot()` run
-- `plot_top_features()`: spatial effects of the `n_top` most significant
-  features on a shared scale
+With `"auto"`, candidates are fitted only when they are valid for the feature
+(Gamma and inverse Gaussian need all values positive), and the selected power
+and family are reported per feature. Poisson is not an `"auto"` candidate,
+because its fixed dispersion makes the test anti-conservative on overdispersed
+data; use `tweedie_p = 1` to fit it on purpose. For integer data, the
+estimated Tweedie power is bounded below at 1.1 to avoid the density spikes
+near p = 1. All families use a log link.
 
-Both plotting functions save PDF/PNG/SVG/TIFF files when given `output_dir`:
+**Two-part model.** `two_part = TRUE` fits a binomial model for detection and
+a positive-part model for abundance where detected, then combines the two
+spatial p-values with the Cauchy combination test. Use it when spatial
+patterns may appear in *whether* a feature is detected as well as in *how
+much*.
+
+**Multiple testing.** p-values are adjusted across features with
+`padj_method` (default Benjamini–Yekutieli, `"BY"`); any method accepted by
+`p.adjust()` works.
+
+### 5. Results
 
 ```r
-plot_feature(spe_res, "GENE1", output_dir = "figures", formats = c("pdf", "png"))
-plot_top_features(spe_res, n_top = 9, output_dir = "figures")
+res <- get_tweedspot_results(spe)                   # all features, by padj
+res <- get_tweedspot_results(spe, sort_by = "dev_expl")
+top <- top_spatial_genes(spe, n = 20, rank_by = "stat")
 ```
 
-Key arguments:
+| Column | Meaning |
+| --- | --- |
+| `feature` | Row name of the feature |
+| `feature_name` | Readable name from `rowData()` (for example a gene symbol), when available |
+| `stat` | Test statistic for the spatial smooth (larger = stronger evidence) |
+| `pval` | p-value for the spatial smooth |
+| `padj` | Adjusted p-value (`padj_method`) |
+| `edf` | Effective degrees of freedom of the smooth: about 1–2 for a simple gradient, larger for more complex patterns |
+| `dev_expl` | Fraction of deviance explained by the full model |
+| `p`, `family` | Variance power and model family used for the feature |
 
-- `seed`: optional whole number that makes runs reproducible; it is stored
-  and reused by the plotting functions, and the caller's random-number state
-  is restored afterwards
+The same values are stored in `rowData(spe)` with a `tweedspot_` prefix
+(`tweedspot_padj`, `tweedspot_edf`, and so on), so they travel with the
+object. Features that could not be fitted have `NA` results.
 
-- `input`: a `SpatialExperiment`
-- `assay_name`: assay to model, typically `"counts"`
-- `covariates`: optional one-sided formula or character vector of `colData(input)` variables
-- `two_part`: optional two-part agnostic model
-- `use_bam`: use `mgcv::bam()` for faster fitting on larger datasets
-- `smooth_k`: optional smooth basis size to trade flexibility for speed
-- `size_factor_method`: `"scran"` (default) or `"library_size"` (total
-  counts) offsets, both modality-agnostic, or `"spanorm"` for spatially-aware
-  SpaNorm normalization of spatial transcriptomics counts
-- `spanorm_output`: with `"spanorm"`, use SpaNorm as gene- and spot-specific
-  size factors on raw counts (`"size_factor"`, default) or model SpaNorm
-  percentile-adjusted counts (`"counts"`)
-- `tweedie_p`: optionally select an `mgcv`-supported Tweedie variance power
-  mapping, including estimated Tweedie (`NULL`), Gaussian (`0`), Poisson (`1`),
-  fixed Tweedie powers in `(1, 2]`, or inverse Gaussian (`3`) for strictly
-  positive responses
+### 6. Cell-type-specific testing
 
-## Cell-Type-Specific Testing
-
-For single-cell-resolution data (Xenium, CosMx, MERFISH, segmented imaging),
-`group` tests each feature for spatial variation *within* each cell type, so a
-marker that only reflects where a cell type sits is not called:
+In single-cell-resolution data (Xenium, CosMx, MERFISH, Slide-seq, segmented
+imaging), a cell-type marker looks spatially variable simply because that cell
+type is clustered. Group mode separates this composition effect from spatial
+variation within a cell type:
 
 ```r
 spe <- filter_features(spe, group = "cell_type", smooth_k = 20)
-spe <- tweedspot(spe, group = "cell_type", smooth_k = 20)
-get_tweedspot_results(spe, group = "T cell")
+spe <- tweedspot(spe, group = "cell_type", smooth_k = 20, seed = 1)
+
+get_tweedspot_results(spe, group = "Astrocyte")     # one cell type
+get_tweedspot_results(spe, group = TRUE)            # all feature x type pairs
+top_spatial_genes(spe, n = 10, group = "Astrocyte")
+plot_feature(spe, "Gfap", group = "Astrocyte")
 ```
 
-Each type is fitted with its own spatial smooth on shared size factors and
-coordinates; types smaller than `min_group_size` are skipped; and p-values are
-adjusted stage-wise by default (`group_adjust = "stagewise"`, or `"global"` /
-`"per_group"`).
+How it works:
 
-## SpaNorm Normalization
+- Each cell type is fitted on its own locations with its own spatial smooth;
+  size factors and coordinate scaling are shared across types.
+- Cell types with fewer than `min_group_size` (default 50) locations are
+  skipped, as are features detected in too few locations of a type.
+- Covariates that are constant within a type are dropped for that type.
+- Adjustment across feature × type pairs, `group_adjust`:
+  - `"stagewise"` (default): first screen features (any type spatial?), then
+    confirm which types, controlling the false discovery rate at `alpha`;
+  - `"global"`: one adjustment over all pairs;
+  - `"per_group"`: a separate adjustment within each type.
 
-For spatial transcriptomics, library size can itself vary with tissue
-structure. [SpaNorm](https://bioconductor.org/packages/SpaNorm) estimates a
-spatially smooth library-size effect separately from spatial biology, without
-domain labels, and TweedSpot can use that fit as an optional alternative to
-scran. TweedSpot treats SpaNorm's estimate as known, so when library size is
-spatially structured the spatial test can be strongly anti-conservative; use
-it as an exploratory option and check calibration on your data. TweedSpot can
-use a SpaNorm fit in two ways:
+Group results include `group`, `n_locations`, `n_detected`, `tested`, and a
+`reason` for untested pairs (`group_too_small`, `low_model_support`,
+`fit_failed`). Per-feature summaries are added to `rowData(spe)` as
+`tweedspot_group_padj` and `tweedspot_group_sig` (the types where the feature
+is significant).
+
+### 7. Figures
 
 ```r
-# Raw counts + SpaNorm library-size component as the offset
-spe_res <- tweedspot(spe, size_factor_method = "spanorm")
+# Observed signal | TweedSpot fit | spatial effect, for one feature
+plot_feature(spe, "MBP", output_dir = "figures", formats = c("pdf", "png"))
 
-# SpaNorm percentile-adjusted counts, no further offset
-spe_res <- tweedspot(spe, size_factor_method = "spanorm",
-                     spanorm_output = "counts")
+# Spatial effects of the top features on a shared colour scale
+plot_top_features(spe, n_top = 9, output_dir = "figures")
 ```
 
-SpaNorm subsamples spots when fitting, so pass `seed` (for example
-`tweedspot(spe, size_factor_method = "spanorm", seed = 1)`) for reproducible
-results. The fit is stored in `metadata(spe_res)$SpaNorm` with a fingerprint of
-the data and settings, and reused by later calls such as `plot_feature()` only
-when that fingerprint matches. Install SpaNorm with
-`BiocManager::install("SpaNorm")`.
+Both functions refit with the exact settings of the `tweedspot()` run, return
+`ggplot`/`patchwork` objects you can modify further, and use colour-blind-safe
+Mako and Rocket palettes. Set `output_dir` to save files in PDF, PNG, SVG,
+or TIFF at `dpi` resolution; `width` and `height` are in inches.
 
-## Tweedie Index Parameter
+### 8. Reproducibility
 
-TweedSpot uses `mgcv` as its modeling engine, so the supported Tweedie index
-settings follow the families that can be represented cleanly inside
-`mgcv::gam()` and `mgcv::bam()`. The `tweedie_p` argument controls this behavior
-directly.
+`seed` makes a run reproducible (scran pooling and SpaNorm subsampling use
+random numbers). It is stored with the results and reused by the plotting
+functions, and your own random-number state is restored after the call.
+Results from an earlier run are cleared before each new `tweedspot()` call,
+so results from different settings are never mixed.
 
-By default, `tweedie_p = NULL`, which fits an adaptive Tweedie GAM using
-`mgcv::tw()`. In this mode, the Tweedie index is estimated during model fitting.
-This is the recommended default for count-like spatial transcriptomics data
-because it lets each gene adapt to its own mean-variance relationship.
+### 9. Speed and memory
 
-Set `tweedie_p = "auto"` to choose the variance power per gene: TweedSpot fits
-the Gaussian, estimated Tweedie, Gamma and inverse Gaussian models that are
-valid for that gene's data, and keeps the one with the lowest BIC (or AIC via
-`p_criterion = "AIC"`). Poisson is not a candidate because its fixed dispersion
-makes the selected test anti-conservative; use `tweedie_p = 1` to fit it
-explicitly. The choice is stored in
-`rowData()$tweedspot_p` and `rowData()$tweedspot_family`.
+- `smooth_k` controls the size of the spatial basis. Smaller values are faster
+  but can miss fine patterns; 20–50 works well for most tissues.
+- `use_bam = TRUE` uses `mgcv::bam()` with discretization
+  (`bam_discrete = TRUE`), which is much faster on tens of thousands of
+  locations.
+- `BPPARAM` fits features in parallel, for example
+  `BiocParallel::MulticoreParam(8)`.
+- Sparse and `DelayedArray` assays are read one feature at a time, without a
+  dense copy of the whole matrix.
 
-You can also provide fixed values:
+## Function reference
 
-| `tweedie_p` | Model family used by TweedSpot | Typical use |
-| --- | --- | --- |
-| `NULL` | `mgcv::tw()` | Estimate the Tweedie index during fitting |
-| `"auto"` | best of the candidates below by BIC/AIC | Let each gene pick its variance power |
-| `0` | `stats::gaussian()` | Continuous approximately normal outcomes |
-| `1` | `stats::poisson()` | Poisson count model |
-| `1 < p < 2` | `mgcv::Tweedie(p = p)` | Compound Poisson-Gamma Tweedie model with a point mass at zero |
-| `2` | `mgcv::Tweedie(p = 2)` | Gamma boundary case |
-| `3` | `stats::inverse.gaussian()` | Strictly positive continuous outcomes |
+| Function | Purpose |
+| --- | --- |
+| `filter_features()` | Remove or flag low-information features and low-quality locations |
+| `tweedspot()` | Fit spatial GAMs and test each feature for spatial variation |
+| `get_tweedspot_results()` | Results table for all features, or per cell type |
+| `top_spatial_genes()` | The top `n` features by `padj`, `pval`, `stat`, or `dev_expl` |
+| `plot_feature()` | Observed, fitted, and spatial-effect panels for one feature |
+| `plot_top_features()` | Spatial effects of the top `n_top` features |
 
-Values between `0` and `1`, values between `2` and `3`, negative values, and
-values greater than `3` are not supported in the current `mgcv` implementation
-used by TweedSpot. The inverse Gaussian option (`tweedie_p = 3`) requires
-strictly positive responses, so it is usually not appropriate for raw spatial
-count matrices containing zeros.
+## Where results are stored
 
-Examples:
+| Location | Contents |
+| --- | --- |
+| `rowData(spe)$tweedspot_*` | Per-feature results (`stat`, `pval`, `padj`, `edf`, `dev_expl`, `p`, `family`) |
+| `rowData(spe)$tweedspot_group_padj`, `tweedspot_group_sig` | Per-feature summaries from group mode |
+| `metadata(spe)$tweedspot` | Settings of the last run, used by the plotting functions |
+| `metadata(spe)$tweedspot_group` | Feature × group results table |
+| `metadata(spe)$filter_features` | Settings and summary of filtering |
+| `metadata(spe)$SpaNorm` | Cached SpaNorm fit |
+
+## Learn more
+
+The vignette walks through a full analysis, including a real cell-type
+example on Slide-seqV2 mouse hippocampus data:
 
 ```r
-# Estimate the Tweedie index per gene
-spe_res <- tweedspot(
-  input = spe,
-  assay_name = "counts",
-  tweedie_p = NULL
-)
-
-# Fixed compound Poisson-Gamma Tweedie index
-spe_res <- tweedspot(
-  input = spe,
-  assay_name = "counts",
-  tweedie_p = 1.5
-)
-
-# Poisson spatial GAM
-spe_res <- tweedspot(
-  input = spe,
-  assay_name = "counts",
-  tweedie_p = 1
-)
-
-# Gaussian spatial GAM for continuous assays
-spe_res <- tweedspot(
-  input = spe,
-  assay_name = "counts",
-  tweedie_p = 0
-)
+browseVignettes("TweedSpot")
 ```
 
-The older `family` argument is still available for users who want to pass an
-`mgcv` family directly. When `tweedie_p` is supplied, it takes precedence over
-`family`.
-
-## Output
-
-TweedSpot writes these per-gene fields to `rowData(input)`:
-
-- `tweedspot_stat`
-- `tweedspot_pval`
-- `tweedspot_padj`
-- `tweedspot_edf`
-- `tweedspot_dev_expl`
-
-## Package Notes
-
-The package is built around the `SpatialExperiment` container and writes
-gene-level inference back into `rowData()`. See the vignette for a fuller
-workflow including filtering, parallel model fitting, result extraction, and
-visualization.
+Bug reports and feature requests:
+<https://github.com/himelmallick/TweedSpot/issues>
 
 ## License
 

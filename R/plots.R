@@ -438,8 +438,7 @@ tweedspot_plot_settings <- function(input, overrides = list()) {
 # normalized scale (divided by the size factor) and the spatial smooth as a log2
 # fold change relative to the feature's average.
 tweedspot_plot_fits <- function(input, idx, settings, locations = NULL) {
-  restore_rng <- tweedspot_set_seed(settings$seed)
-  on.exit(restore_rng(), add = TRUE)
+  tweedspot_local_seed(settings$seed)
   fit_input <- tweedspot_prepare_input(
     input = input,
     assay_name = settings$assay_name,

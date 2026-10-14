@@ -220,18 +220,20 @@ spe_res <- tweedspot(
 
 # Extract and rank results
 
-TweedSpot writes per-gene outputs into `rowData(input)`. The main result
-columns are:
+`get_tweedspot_results()` returns one row per feature, sorted by adjusted
+p-value (ties broken by the test statistic):
 
-- `tweedspot_stat`: spatial smooth test statistic
-- `tweedspot_pval`: raw p-value
-- `tweedspot_padj`: adjusted p-value
-- `tweedspot_edf`: effective degrees of freedom of the spatial smooth
-- `tweedspot_dev_expl`: deviance explained by the fitted GAM
+| Column | Meaning |
+|---|---|
+| `feature` | Row name of the feature |
+| `feature_name` | Readable name from `rowData()`, when it differs from the row name |
+| `stat` | Test statistic of the spatial smooth |
+| `pval`, `padj` | Raw and adjusted p-value (`padj_method`, Benjamini-Yekutieli by default) |
+| `edf` | Effective degrees of freedom of the smooth (pattern complexity) |
+| `dev_expl` | Deviance explained by the model |
+| `p`, `family` | Fitted Tweedie variance power and family |
 
-`get_tweedspot_results()` returns a clean `data.frame` representation of these
-results. By default it sorts by adjusted p-value, breaking ties by
-`tweedspot_stat`.
+The same values are stored in `rowData(spe_res)` with a `tweedspot_` prefix.
 
 ```{r inspect-results}
 res <- get_tweedspot_results(spe_res)
@@ -342,7 +344,7 @@ refits the model with the settings `tweedspot()` stored in
 tested.
 
 ```{r plot-feature, fig.width=7.2, fig.height=2.9}
-top_feature <- rownames(res)[1]
+top_feature <- res$feature[1]
 plot_feature(spe_res, top_feature)
 ```
 

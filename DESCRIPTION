@@ -31,7 +31,8 @@ Imports:
     S4Vectors,
     BiocParallel,
     methods,
-    stats
+    stats,
+    withr
 Suggests:
     SpaNorm,
     STexampleData,
@@ -52,7 +53,8 @@ biocViews:
     Spatial,
     Regression,
     StatisticalMethod,
-    DifferentialExpression
+    DifferentialExpression,
+    QualityControl
 URL: https://github.com/mallick-lab/TweedSpot
 BugReports: https://github.com/mallick-lab/TweedSpot/issues
 VignetteBuilder: knitr

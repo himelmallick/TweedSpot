@@ -225,3 +225,21 @@ test_that("auto works with the two-part model and with plot_feature()", {
                     size_factor_method = "library_size")
   expect_s3_class(p, "patchwork")
 })
+
+test_that("auto passes on warnings from the selected fit only", {
+  real_fit <- tweedspot_fit
+  local_mocked_bindings(tweedspot_fit = function(formula, family, ...) {
+    if (inherits(family, "family") && identical(family$family, "Gamma")) {
+      warning("gamma candidate warned")
+    }
+    real_fit(formula, family, ...)
+  })
+  # Gamma data: Gamma is selected, so its warning is shown.
+  expect_warning(fit_auto(auto_frame("gamma")), "gamma candidate warned")
+  # Positive Gaussian data: Gamma is a candidate but Gaussian is selected, so
+  # the Gamma candidate's warning is not shown.
+  d <- auto_frame("gaussian")
+  expect_true("gamma" %in% names(tweedspot_auto_candidates(d$expr)))
+  expect_no_warning(sel <- fit_auto(d))
+  expect_identical(attr(sel, "tweedspot_selected"), "gaussian")
+})

@@ -10,7 +10,13 @@ test_that("get_tweedspot_results sorts by adjusted p-value and statistic", {
 
   res <- get_tweedspot_results(spe, sort_by = "padj")
 
-  expect_identical(res$gene_id[1:3], c("gene2", "gene3", "gene1"))
+  expect_identical(res$feature[1:3], c("gene2", "gene3", "gene1"))
+  expect_identical(colnames(res),
+                   c("feature", "feature_name", "stat", "pval", "padj", "edf", "dev_expl"))
+  expect_identical(res$feature_name[1], "RPLP0")
+  expect_identical(get_tweedspot_results(spe, sort_by = "dev_expl")$feature[1], "gene2")
+  expect_identical(get_tweedspot_results(spe, sort_by = "none")$feature,
+                   paste0("gene", 1:4))
 })
 
 test_that("top_spatial_genes uses ranked TweedSpot results", {
@@ -26,5 +32,5 @@ test_that("top_spatial_genes uses ranked TweedSpot results", {
   top_res <- top_spatial_genes(spe, n = 2, rank_by = "padj")
 
   expect_equal(nrow(top_res), 2)
-  expect_identical(top_res$gene_id, c("gene2", "gene3"))
+  expect_identical(top_res$feature, c("gene2", "gene3"))
 })

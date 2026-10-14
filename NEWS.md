@@ -27,6 +27,9 @@
   `exclude_ribo` remain for transcriptomics.
 - `plot_spatial_gene()` and `plot_spatial_fit()` are replaced by
   `plot_feature()` and `plot_top_features()`.
+- `get_tweedspot_results()` and `top_spatial_genes()` return a plain table
+  with columns `feature`, `feature_name`, `stat`, `pval`, `padj`, `edf`,
+  `dev_expl`, `p`, and `family`; `rowData()` keeps the `tweedspot_` prefix.
 - The two-part model always combines its p-values with the Cauchy combination
   test; the `combine` argument is removed.
 - All families use a log link, and spatial coordinates are scaled by one
@@ -50,7 +53,7 @@
 
 ### Dependencies
 
-- `MatrixGenerics` added to Imports; `SpaNorm`, `patchwork`, `svglite`,
+- `MatrixGenerics` and `withr` added to Imports; `SpaNorm`, `patchwork`, `svglite`,
   `Matrix`, and `DelayedArray` added to Suggests.
 
 ## TweedSpot 0.99.1

@@ -240,8 +240,7 @@ tweedspot <- function(input,
   tweedspot_check_flag(verbose, "verbose")
   tweedspot_check_scalar(min_group_size, "min_group_size", min_value = 1)
   tweedspot_check_scalar(alpha, "alpha", min_value = 0, max_value = 1)
-  restore_rng <- tweedspot_set_seed(seed)
-  on.exit(restore_rng(), add = TRUE)
+  tweedspot_local_seed(seed)
   labels <- if (is.null(group)) NULL else tweedspot_group_labels(input, group)
   # Start from a clean object so results from an earlier run (ordinary or
   # group-specific) can never be mixed with this run's results.

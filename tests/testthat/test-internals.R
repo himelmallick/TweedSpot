@@ -45,15 +45,15 @@ test_that("tweedspot_check_scalar validates numeric bounds", {
 
 test_that("tweedspot_order_results sorts with statistic tie-breaking", {
   res <- data.frame(
-    tweedspot_padj = c(0.1, 0.1, NA),
-    tweedspot_stat = c(2, 5, 1)
+    padj = c(0.1, 0.1, NA),
+    stat = c(2, 5, 1)
   )
 
-  asc <- TweedSpot:::tweedspot_order_results(res, key_col = "tweedspot_padj", decreasing = FALSE)
-  desc <- TweedSpot:::tweedspot_order_results(res, key_col = "tweedspot_stat", decreasing = TRUE)
+  asc <- TweedSpot:::tweedspot_order_results(res, key_col = "padj", decreasing = FALSE)
+  desc <- TweedSpot:::tweedspot_order_results(res, key_col = "stat", decreasing = TRUE)
 
-  expect_equal(asc$tweedspot_stat, c(5, 2, 1))
-  expect_equal(desc$tweedspot_stat, c(5, 2, 1))
+  expect_equal(asc$stat, c(5, 2, 1))
+  expect_equal(desc$stat, c(5, 2, 1))
 })
 
 test_that("annotation exclusions support name and feature-type based filtering", {

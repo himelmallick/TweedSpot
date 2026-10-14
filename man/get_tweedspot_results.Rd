@@ -28,9 +28,13 @@ feature-by-group table; one or more group labels return only those
 groups' rows.}
 }
 \value{
-A \code{data.frame}. Without \code{group}, the original \code{rowData(input)}
-columns and TweedSpot result columns. With \code{group}, one row per feature
-and group with columns \code{feature}, \code{group}, \code{n_locations}, \code{n_detected},
+A \code{data.frame}. Without \code{group}, one row per feature with columns
+\code{feature} (row name), \code{feature_name} (when \code{rowData()} has a
+\code{feature_name} or \code{gene_name} column that differs from the row names),
+\code{stat} (test statistic of the spatial smooth), \code{pval}, \code{padj}, \code{edf}
+(effective degrees of freedom of the smooth), \code{dev_expl} (deviance
+explained), and, when available, \code{p} (Tweedie variance power) and
+\code{family}. With \code{group}, one row per feature and group with columns \code{feature}, \code{group}, \code{n_locations}, \code{n_detected},
 \code{tested}, \code{reason} (why a pair was not tested), \code{stat}, \code{pval}, \code{padj},
 \code{padj_feature} (stage-wise screening p-value), \code{edf}, \code{dev_expl}, \code{p}, and
 \code{family}.

@@ -15,9 +15,13 @@
 #'   feature-by-group table; one or more group labels return only those
 #'   groups' rows.
 #'
-#' @return A `data.frame`. Without `group`, the original `rowData(input)`
-#'   columns and TweedSpot result columns. With `group`, one row per feature
-#'   and group with columns `feature`, `group`, `n_locations`, `n_detected`,
+#' @return A `data.frame`. Without `group`, one row per feature with columns
+#'   `feature` (row name), `feature_name` (when `rowData()` has a
+#'   `feature_name` or `gene_name` column that differs from the row names),
+#'   `stat` (test statistic of the spatial smooth), `pval`, `padj`, `edf`
+#'   (effective degrees of freedom of the smooth), `dev_expl` (deviance
+#'   explained), and, when available, `p` (Tweedie variance power) and
+#'   `family`. With `group`, one row per feature and group with columns `feature`, `group`, `n_locations`, `n_detected`,
 #'   `tested`, `reason` (why a pair was not tested), `stat`, `pval`, `padj`,
 #'   `padj_feature` (stage-wise screening p-value), `edf`, `dev_expl`, `p`, and
 #'   `family`.
@@ -52,52 +56,47 @@ get_tweedspot_results <- function(input,
     return(tweedspot_group_results(input, group, sort_by, decreasing))
   }
   tweedspot_check_locations(input, S4Vectors::metadata(input)$tweedspot$locations)
-  res <- as.data.frame(SummarizedExperiment::rowData(input))
-  feature_ids <- rownames(input)
-  if (is.null(feature_ids)) {
-    feature_ids <- paste0("feature", seq_len(nrow(input)))
-  }
-  res <- cbind(feature = feature_ids, res[, setdiff(colnames(res), "feature"), drop = FALSE])
-  required <- c(
-    "tweedspot_stat",
-    "tweedspot_pval",
-    "tweedspot_padj",
-    "tweedspot_edf",
-    "tweedspot_dev_expl"
-  )
-  missing_cols <- setdiff(required, colnames(res))
+  rd <- SummarizedExperiment::rowData(input)
+  required <- paste0("tweedspot_", c("stat", "pval", "padj", "edf", "dev_expl"))
+  missing_cols <- setdiff(required, colnames(rd))
   if (length(missing_cols)) {
     stop(sprintf(
       "TweedSpot result columns not found in `rowData(input)`: %s.",
       paste(missing_cols, collapse = ", ")
     ))
   }
+
+  # A clean results table: one row per feature, short column names.
+  feature_ids <- rownames(input)
+  if (is.null(feature_ids)) {
+    feature_ids <- paste0("feature", seq_len(nrow(input)))
+  }
+  res <- data.frame(feature = feature_ids, stringsAsFactors = FALSE)
+  name_col <- tweedspot_name_cols(input)
+  if (length(name_col)) {
+    names_vec <- as.character(rd[[name_col[1L]]])
+    if (!identical(names_vec, feature_ids)) {
+      res$feature_name <- names_vec
+    }
+  }
+  result_cols <- c("stat", "pval", "padj", "edf", "dev_expl", "p", "family")
+  for (col in result_cols) {
+    src <- paste0("tweedspot_", col)
+    if (src %in% colnames(rd)) {
+      res[[col]] <- rd[[src]]
+    }
+  }
   if (sort_by == "none") {
     return(res)
   }
 
-  default_decreasing <- switch(
-    sort_by,
-    padj = FALSE,
-    pval = FALSE,
-    stat = TRUE,
-    dev_expl = TRUE
-  )
   if (is.null(decreasing)) {
-    decreasing <- default_decreasing
+    decreasing <- sort_by %in% c("stat", "dev_expl")
   }
   if (!is.logical(decreasing) || length(decreasing) != 1L || is.na(decreasing)) {
     stop("`decreasing` must be `TRUE`, `FALSE`, or `NULL`.")
   }
-
-  key_col <- switch(
-    sort_by,
-    padj = "tweedspot_padj",
-    pval = "tweedspot_pval",
-    stat = "tweedspot_stat",
-    dev_expl = "tweedspot_dev_expl"
-  )
-  res <- tweedspot_order_results(res, key_col = key_col, decreasing = decreasing)
+  res <- tweedspot_order_results(res, key_col = sort_by, decreasing = decreasing)
   rownames(res) <- NULL
   res
 }
