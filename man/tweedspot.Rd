@@ -9,7 +9,6 @@ tweedspot(
   assay_name = "counts",
   covariates = NULL,
   two_part = FALSE,
-  combine = c("CCT", "min"),
   family = "tw",
   tweedie_p = NULL,
   fit_method = "REML",
@@ -17,8 +16,16 @@ tweedspot(
   bam_discrete = TRUE,
   bam_nthreads = 1L,
   smooth_k = NULL,
-  size_factor_method = c("scran", "library_size"),
+  size_factor_method = c("scran", "library_size", "spanorm"),
+  spanorm_output = c("size_factor", "counts"),
+  spanorm_args = list(),
+  p_criterion = c("BIC", "AIC"),
   padj_method = "BY",
+  group = NULL,
+  min_group_size = 50,
+  group_adjust = c("stagewise", "global", "per_group"),
+  alpha = 0.05,
+  seed = NULL,
   BPPARAM = BiocParallel::bpparam(),
   verbose = TRUE
 )
@@ -35,18 +42,23 @@ Character vectors of \code{colData(input)} column names are also supported.}
 
 \item{two_part}{Logical; if \code{TRUE}, fit the two-part (hurdle) model (Tweedie
 on counts plus a binomial model on presence/absence) and combine the two
-p-values. Default \code{FALSE}.}
-
-\item{combine}{P-value combination rule for the two-part model: \code{"CCT"}
-(Cauchy) or \code{"min"}. Default \code{"CCT"}.}
+p-values with the Cauchy combination test (CCT), which tests whether
+either part varies in space and stays valid when the two p-values are
+dependent. When the presence/absence part is skipped, the count part's
+p-value is used. Default \code{FALSE}.}
 
 \item{family}{\code{mgcv} family for the count model. Default \code{"tw"} (Tweedie).
 Ignored when \code{tweedie_p} is supplied.}
 
-\item{tweedie_p}{Optional Tweedie variance power. If \code{NULL}, TweedSpot
-estimates the Tweedie index with \code{\link[mgcv:tw]{mgcv::tw()}}. Supported fixed values are
-\code{0} for Gaussian, \code{1} for Poisson, values in \verb{(1, 2]} for fixed Tweedie,
-and \code{3} for inverse Gaussian with strictly positive responses.}
+\item{tweedie_p}{Tweedie variance power \eqn{p}, where
+\eqn{Var(Y) = \phi \mu^p}. If \code{NULL} (default), TweedSpot estimates
+\eqn{p \in (1, 2)} per gene with \code{\link[mgcv:Tweedie]{mgcv::tw()}}. Supported fixed values are
+\code{0} for Gaussian, \code{1} for Poisson, values in \verb{(1, 2]} for fixed Tweedie
+(\code{2} is Gamma and requires strictly positive responses), and \code{3} for
+inverse Gaussian with strictly positive responses. All families use a log
+link so the size-factor offset acts multiplicatively. Use \code{"auto"} to
+choose the variance power per gene by an information criterion (see
+\code{p_criterion} and Details).}
 
 \item{fit_method}{Smoothing parameter estimation method passed to \code{mgcv},
 e.g. \code{"REML"} (default) or \code{"GCV.Cp"}.}
@@ -63,15 +75,60 @@ via \code{mgcv::bam(discrete = TRUE)} for speed. Default \code{TRUE}.}
 values can speed fitting at the cost of flexibility. Default \code{NULL}, which
 uses \code{mgcv}'s default.}
 
-\item{size_factor_method}{Method used to compute library size offsets when
-\code{colData(input)$sizeFactor} is not present. Options are \code{"scran"} and
-\code{"library_size"}. Default \code{"scran"}.}
+\item{size_factor_method}{Method used to compute the size-factor offset.
+\code{"scran"} (default) uses pooling-based deconvolution size factors from
+\code{\link[scran:computeSumFactors]{scran::computeSumFactors()}}; \code{"library_size"} uses total counts scaled to
+a median of one; \code{"spanorm"} uses a SpaNorm fit, either as gene- and
+spot-specific size factors or as normalized counts (see \code{spanorm_output}
+and Details). For \code{"scran"} and \code{"library_size"}, an existing
+\code{colData(input)$sizeFactor} is used as-is. For \code{"spanorm"}, an existing
+\code{colData(input)$sizeFactor} is used by SpaNorm as its base library size.
+The SpaNorm fit is stored in the returned object's metadata with a
+fingerprint of the data, settings, and \code{seed}; later calls (for example
+\code{\link[=plot_feature]{plot_feature()}}) reuse it only when that fingerprint matches, and refit
+otherwise. SpaNorm subsamples locations at random, so set \code{seed} for
+reproducible results.}
+
+\item{spanorm_output}{How the SpaNorm fit enters TweedSpot when
+\code{size_factor_method = "spanorm"}: \code{"size_factor"} (default) models the
+raw counts with the SpaNorm library-size (and batch) component as a gene-
+and spot-specific offset; \code{"counts"} models SpaNorm percentile-adjusted
+counts (PAC) with no further offset. Ignored for other methods.}
+
+\item{spanorm_args}{Optional named list of additional arguments passed to
+\code{SpaNorm::SpaNorm()} when \code{size_factor_method = "spanorm"}, for example
+\code{list(sample.p = 0.25, df.tps = 6)}. \code{adj.method} is fixed to \code{"logpac"}.}
+
+\item{p_criterion}{Information criterion used when \code{tweedie_p = "auto"}:
+\code{"BIC"} (default) or \code{"AIC"}. Both use the log-likelihood and effective
+degrees of freedom reported by \code{\link[mgcv:logLik.gam]{mgcv::logLik.gam()}}.}
 
 \item{padj_method}{Multiple-testing correction passed to \code{\link[stats:p.adjust]{stats::p.adjust()}}.
 Default \code{"BY"}.}
 
-\item{BPPARAM}{A \link[BiocParallel:BiocParallelParam]{BiocParallel::BiocParallelParam} object controlling
-parallelization across genes. Default \code{\link[BiocParallel:bpparam]{BiocParallel::bpparam()}}, which
+\item{group}{Optional name of a discrete \code{colData(input)} column, such as a
+cell-type label. When given, each feature is tested for spatial variation
+\emph{within} each group (see Details), and results are stored per feature and
+group instead of in the usual \code{rowData()} columns. Default \code{NULL}.}
+
+\item{min_group_size}{Groups with fewer locations than this are not tested.
+Default \code{50}.}
+
+\item{group_adjust}{Multiple-testing adjustment across features and groups:
+\code{"stagewise"} (default), \code{"global"}, or \code{"per_group"}. See Details.}
+
+\item{alpha}{Target significance level for group results: used by the
+stage-wise adjustment and to summarise \code{rowData(input)$tweedspot_group_sig}.
+Default \code{0.05}.}
+
+\item{seed}{Optional whole number. When given, the random-number generator
+is seeded with it for the duration of the call (and restored afterwards),
+so steps that use random numbers, such as SpaNorm's subsampling of
+locations, give identical results on every run. The seed is stored and
+reused by \code{\link[=plot_feature]{plot_feature()}} and \code{\link[=plot_top_features]{plot_top_features()}}. Default \code{NULL}.}
+
+\item{BPPARAM}{A \link[BiocParallel:BiocParallelParam-class]{BiocParallel::BiocParallelParam} object controlling
+parallelization across genes. Default \code{\link[BiocParallel:register]{BiocParallel::bpparam()}}, which
 uses the currently registered BiocParallel backend.}
 
 \item{verbose}{Logical; if \code{TRUE}, print lightweight progress messages before
@@ -79,12 +136,98 @@ and after gene-wise model fitting. Default \code{TRUE}.}
 }
 \value{
 The input \code{SpatialExperiment} with per-gene statistic, p-value,
-adjusted p-value, smooth effective degrees of freedom, and deviance
-explained written to \code{\link[SummarizedExperiment:rowData]{SummarizedExperiment::rowData()}}.
+adjusted p-value, smooth effective degrees of freedom, deviance
+explained, fitted variance power (\code{tweedspot_p}), and the corresponding
+family (\code{tweedspot_family}) written to \code{\link[SummarizedExperiment:SummarizedExperiment-class]{SummarizedExperiment::rowData()}}.
+The model settings are stored in \code{S4Vectors::metadata(input)$tweedspot}
+and reused by \code{\link[=plot_feature]{plot_feature()}} and \code{\link[=plot_top_features]{plot_top_features()}}.
 }
 \description{
 \code{tweedspot()} fits a Tweedie GAM with a spatial smooth \code{s(x, y)} per gene
 and tests each gene for overall spatial variation.
+}
+\details{
+\strong{Normalization.} TweedSpot models raw counts with a log-link GAM and a
+size-factor offset, so only the relative size factors across spots matter.
+\code{scuttle::logNormCounts()} is not offered as a separate option because,
+without user-supplied size factors, it uses library-size factors
+(\code{colSums / mean(colSums)}) that differ from \code{"library_size"} only by a
+global constant, which the model intercept absorbs; with existing size
+factors it reuses them. Its log-transformed output is also incompatible with
+modelling raw counts. \code{"spanorm"} (Salim et al., 2025, Genome Biology)
+estimates a spatially smooth, gene-specific library-size effect jointly with
+spatial biology, without domain or cluster labels. TweedSpot treats that
+estimated effect as known, so any error in separating library size from
+biology remains in the data as spatial structure. When library size is
+itself spatially structured, this can make the spatial test strongly
+anti-conservative (in simulations, most null genes were called
+significant). Use \code{"spanorm"} as an exploratory option and check its
+calibration on your data; \code{"scran"} remains the default. SpaNorm is specific
+to spatial transcriptomics count data; \code{"scran"} and \code{"library_size"} are
+the modality-agnostic options.
+
+SpaNorm fits, per gene, a negative binomial model whose log mean is
+\eqn{\gamma_g + f_g(x, y) + \{a_g + h_g(x, y)\}\log LS + \text{batch}},
+where \eqn{f_g} is spatial biology and the second term is a spatially
+varying library-size effect. With \code{spanorm_output = "size_factor"},
+TweedSpot models raw counts and uses the library-size and batch part of
+this predictor as the offset, \eqn{\log s_{gi}}, so the spatial biology is
+tested by the TweedSpot smooth rather than removed or reused. With
+\code{spanorm_output = "counts"}, TweedSpot models SpaNorm's percentile-adjusted
+counts, \eqn{2^{\text{logpac}} - 1}, which are non-negative integers with
+the library-size effect removed, using a unit offset. The size-factor form
+is the default because it keeps the original count likelihood.
+
+\strong{Automatic variance power.} With \code{tweedie_p = "auto"}, each gene is
+fitted separately under several candidate variance functions
+\eqn{V(\mu) = \phi\mu^p}: Gaussian (\eqn{p = 0}), Tweedie with \eqn{p}
+estimated in \eqn{(1, 2)}, and, when the gene has no zeros, Gamma
+(\eqn{p = 2}) and inverse Gaussian (\eqn{p = 3}). Every candidate shares the
+log link, spatial smooth, covariates, and offset, and estimates its own
+dispersion, so they differ only in the variance function. Poisson
+(\eqn{p = 1}) is not a candidate: its dispersion is fixed at 1, and choosing
+it on the same fit that is tested inflates false positives for genes whose
+noise happens to look spatial. It remains available as \code{tweedie_p = 1}. Each candidate is scored by
+\deqn{\mathrm{BIC} = -2\ell + \log(n)\,\mathrm{df}}
+(or \eqn{\mathrm{AIC} = -2\ell + 2\,\mathrm{df}} with
+\code{p_criterion = "AIC"}), where \eqn{\ell} is the maximized
+log-likelihood and df the effective degrees of freedom from
+\code{\link[mgcv:logLik.gam]{mgcv::logLik.gam()}}: smooth EDF, plus one for an estimated scale, plus one
+for an estimated Tweedie power. The candidate with the smallest value is used
+for the spatial test, and its power is reported in
+\code{rowData(input)$tweedspot_p} and \code{rowData(input)$tweedspot_family}. For
+integer data the estimated Tweedie power is restricted to \eqn{p \ge 1.1},
+because as \eqn{p \to 1} the Tweedie density concentrates on spikes at the
+integers, which inflates its likelihood and the spatial test.
+
+\strong{Group-specific testing.} With \code{group = "cell_type"}, the locations of each
+group are fitted separately with the same model (\code{s(x, y)}, covariates,
+offset, and family settings) to ask whether a feature varies in space among
+locations of that group. A feature that differs between groups but is flat
+within each group, a pure composition effect, is therefore not called
+spatially variable. Size factors and the coordinate scaling are computed
+once on all locations so that every group shares one scale; the spatial
+basis size is capped by each group's number of locations; covariates that
+are constant within a group are dropped for that group; and a feature is
+tested in a group only if it is detected in at least as many of its
+locations as the smooth has basis functions. Groups with fewer than
+\code{min_group_size} locations are skipped.
+
+Group p-values are adjusted with \code{group_adjust}. \code{"stagewise"} first screens
+each feature with the Cauchy combination of its group p-values and adjusts
+those across features with \code{padj_method}, then Holm-adjusts the group
+p-values within the feature at the reduced level \code{alpha * R / m} (R of m
+features pass the screen); a feature-group pair's adjusted p-value is the
+larger of the screening and confirmation values, so it is significant at
+\code{alpha} only if the feature passes the screen and the group passes
+confirmation. Stage-wise adjusted p-values are calibrated for the \code{alpha}
+used in the run. \code{"global"} adjusts all pairs
+together and \code{"per_group"} adjusts within each group. The full table, one
+row per feature and group, is stored in
+\code{S4Vectors::metadata(input)$tweedspot_group$results} and returned by
+\code{\link[=get_tweedspot_results]{get_tweedspot_results()}} with its \code{group} argument; \code{rowData(input)} gains
+\code{tweedspot_group_padj} (feature-level adjusted p-value) and
+\code{tweedspot_group_sig} (groups significant at \code{alpha}).
 }
 \examples{
 counts <- matrix(
@@ -111,4 +254,12 @@ spe <- tweedspot(
   BPPARAM = BiocParallel::SerialParam()
 )
 SummarizedExperiment::rowData(spe)[, c("tweedspot_stat", "tweedspot_pval")]
+}
+\references{
+Lun ATL, Bach K, Marioni JC (2016). Pooling across cells to normalize
+single-cell RNA sequencing data with many zero counts. \emph{Genome Biology}
+17:75.
+
+Salim A, Bhuva DD, Chen C, et al. (2025). SpaNorm: spatially-aware
+normalization for spatial transcriptomics data. \emph{Genome Biology}.
 }

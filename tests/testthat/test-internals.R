@@ -3,7 +3,10 @@ test_that("tweedspot_libsize uses sizeFactor when present and repairs bad values
   Y <- as.matrix(SummarizedExperiment::assay(spe, "counts"))
   SummarizedExperiment::colData(spe)$sizeFactor <- c(1, NA, 2, 0, 3, 4)
 
-  libsz <- TweedSpot:::tweedspot_libsize(spe, Y, size_factor_method = "scran")
+  expect_warning(
+    libsz <- TweedSpot:::tweedspot_libsize(spe, Y, size_factor_method = "scran"),
+    "2 size factor\\(s\\) were missing, zero, or negative"
+  )
 
   expect_equal(libsz, c(1, 1, 2, 1, 3, 4))
 })
@@ -53,7 +56,7 @@ test_that("tweedspot_order_results sorts with statistic tie-breaking", {
   expect_equal(desc$tweedspot_stat, c(5, 2, 1))
 })
 
-test_that("annotation exclusions support name and biotype based filtering", {
+test_that("annotation exclusions support name and feature-type based filtering", {
   spe <- mock_spe()
   rd <- SummarizedExperiment::rowData(spe)
   rd$biotype <- c("mitochondrial_gene", "ribosomal protein", "other", "other")
@@ -63,8 +66,8 @@ test_that("annotation exclusions support name and biotype based filtering", {
     input = spe,
     exclude_mito = TRUE,
     exclude_ribo = TRUE,
-    gene_name_col = "gene_name",
-    gene_biotype_col = "biotype"
+    feature_name_col = "gene_name",
+    feature_type_col = "biotype"
   )
 
   expect_identical(excluded, c(TRUE, TRUE, FALSE, FALSE))
@@ -73,19 +76,34 @@ test_that("annotation exclusions support name and biotype based filtering", {
       input = spe,
       exclude_mito = TRUE,
       exclude_ribo = FALSE,
-      gene_name_col = "bad_col"
+      feature_name_col = "bad_col"
     ),
-    "gene_name_col"
+    "feature_name_col"
   )
   expect_error(
     TweedSpot:::tweedspot_annotation_exclusions(
       input = spe,
       exclude_mito = FALSE,
       exclude_ribo = TRUE,
-      gene_biotype_col = "bad_col"
+      feature_type_col = "bad_col"
     ),
-    "gene_biotype_col"
+    "feature_type_col"
   )
+})
+
+test_that("mitochondrial and ribosomal name patterns avoid look-alike genes", {
+  genes <- c("MT-CO1", "mt-Nd1", "MT.ATP6", "MTOR", "MTHFR",
+             "RPL10A", "RPS4Y1", "RPLP0", "RPSA", "MRPL12", "Rpl7a",
+             "RPS6KA1", "RPS6KB1", "ACTB")
+  counts <- matrix(1, nrow = length(genes), ncol = 6)
+  spe <- SpatialExperiment::SpatialExperiment(
+    assays = list(counts = `rownames<-`(counts, genes)),
+    spatialCoords = cbind(x = 1:6, y = 1:6)
+  )
+  mito <- TweedSpot:::tweedspot_annotation_exclusions(spe, TRUE, FALSE)
+  ribo <- TweedSpot:::tweedspot_annotation_exclusions(spe, FALSE, TRUE)
+  expect_identical(genes[mito], c("MT-CO1", "mt-Nd1", "MT.ATP6"))
+  expect_identical(genes[ribo], c("RPL10A", "RPS4Y1", "RPLP0", "RPSA", "MRPL12", "Rpl7a"))
 })
 
 test_that("covariate parsing supports formulas and character vectors", {
@@ -149,12 +167,12 @@ test_that("tweedie_p resolves to mgcv-supported model families", {
   )
 })
 
-test_that("gene resolution and coordinate helpers validate inputs", {
+test_that("feature resolution and coordinate helpers validate inputs", {
   spe <- mock_spe()
 
   resolved_by_index <- TweedSpot:::tweedspot_resolve_gene(spe, 1)
   resolved_by_name <- TweedSpot:::tweedspot_resolve_gene(spe, "GENE3")
-  coords <- TweedSpot:::tweedspot_plot_coords(spe)
+  coords <- TweedSpot:::tweedspot_plot_xy(spe)
 
   expect_equal(resolved_by_index$index, 1L)
   expect_match(resolved_by_name$label, "GENE3")
@@ -218,7 +236,6 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
       libsz = libsz,
       covariates = covariates,
       two_part = FALSE,
-      combine = "CCT",
       family = "poisson",
       fit_method = "REML",
       use_bam = FALSE,
@@ -236,25 +253,6 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
       libsz = libsz,
       covariates = covariates,
       two_part = TRUE,
-      combine = "CCT",
-      family = "poisson",
-      fit_method = "REML",
-      use_bam = FALSE,
-      bam_discrete = TRUE,
-      bam_nthreads = 1L,
-      smooth_k = 4,
-      BPPARAM = BiocParallel::SerialParam()
-    )
-  )
-
-  min_part <- suppressWarnings(
-    TweedSpot:::tweedspot_agnostic(
-      Y = Y,
-      coords = coords,
-      libsz = libsz,
-      covariates = covariates,
-      two_part = TRUE,
-      combine = "min",
       family = "poisson",
       fit_method = "REML",
       use_bam = FALSE,
@@ -267,7 +265,6 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
 
   expect_equal(length(one_part$pval), nrow(Y))
   expect_equal(length(two_part$pval), nrow(Y))
-  expect_equal(length(min_part$pval), nrow(Y))
 
   expect_error(
     TweedSpot:::tweedspot_fit_single_gene(
@@ -292,7 +289,6 @@ test_that("single-gene fitting helper and agnostic engine cover major branches",
       libsz = c(0, rep(1, ncol(Y) - 1)),
       covariates = covariates,
       two_part = FALSE,
-      combine = "CCT",
       family = "poisson",
       fit_method = "REML",
       use_bam = FALSE,

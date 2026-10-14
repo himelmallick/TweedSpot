@@ -79,23 +79,35 @@ spe <- spe[seq_len(min(250, nrow(spe))), ]
 spe
 ```
 
-# Prefilter genes
+# Prefilter features
 
-`filter_genes()` removes genes with limited information before model fitting.
-In addition to minimum total counts and percent of nonzero spots, it can also
-filter on the number of nonzero spots, mean counts, variance, and optionally
-exclude mitochondrial or ribosomal genes. By default it also drops spots with
-zero total counts after gene filtering.
+`filter_features()` removes features with limited information before model
+fitting. Its thresholds (minimum total signal, percent and number of locations
+where the feature is detected, mean, and variance) make no assumption about the
+assay, so the same call works for genes, proteins, peaks, or metabolites. For
+intensity data, `detection_threshold` sets the value above which a feature
+counts as detected. Named features such as negative-control probes can be
+removed with `exclude` or `exclude_pattern`, and, for transcriptomics only,
+`exclude_mito` and `exclude_ribo` remove mitochondrial and ribosomal genes.
 
-```{r filter-genes}
-spe <- TweedSpot::filter_genes(
+Two further steps are specific to TweedSpot. First, by default
+(`model_aware = TRUE`) a feature must be detected in at least as many
+locations as the spatial smooth has basis functions, so pass the same
+`smooth_k` you will use in `tweedspot()`. Second, locations can be quality
+controlled with `min_total_per_location`, `min_features_per_location`,
+`outlier_nmads`, `max_excluded_fraction` (for example the mitochondrial
+fraction), and `location_mask`. Use `action = "flag"` to keep everything and
+record the reasons in `filter_keep` and `filter_reason` columns instead.
+
+```{r filter-features}
+spe <- TweedSpot::filter_features(
   input = spe,
   assay_name = "counts",
-  filter_genes_ncounts = 5,
-  filter_genes_pcspots = 5,
-  filter_genes_nspots = 3,
-  filter_genes_mean = 0.05,
-  drop_zero_spots = TRUE,
+  min_total = 5,
+  min_pct_locations = 5,
+  min_locations = 3,
+  min_mean = 0.05,
+  drop_empty_locations = TRUE,
   report = TRUE
 )
 
@@ -234,22 +246,121 @@ hits by adjusted p-value, raw p-value, statistic, or deviance explained.
 top_spatial_genes(spe_res, n = 10, rank_by = "padj")
 ```
 
-# Visualize observed and fitted spatial patterns
+# Cell-type-specific spatial variation
 
-The package also provides plotting helpers for the raw observed expression
-pattern and the fitted spatial smooth for a single gene.
+With single-cell-resolution data, a feature can look spatially variable only
+because cell types are arranged in space: a marker of one cell type is high
+wherever that cell type sits. Setting `group` to a cell-type column tests each
+feature *within* each cell type instead, so only spatial variation among cells
+of the same type is called. Size factors and coordinates are shared across
+types, each type gets its own spatial smooth, and p-values are adjusted
+stage-wise: a feature is first screened across all types, then confirmed type
+by type.
 
-```{r plot-spatial, fig.width=10, fig.height=4}
-top_gene <- res$gene_name[1]
+As a small real example we use Slide-seqV2 data from the mouse hippocampus
+(Stickels et al., 2021), in which each bead carries a cell-type label from RCTD
+(Cable et al., 2022). To keep the example fast we take the three most common
+cell types, 1,500 beads of each, and the 25 most highly expressed genes.
 
-plot_spatial_gene(spe_res, gene = top_gene)
-plot_spatial_fit(
-  spe_res,
-  gene = top_gene,
-  tweedie_p = 1,
-  size_factor_method = "library_size",
-  smooth_k = 5
+```{r cell-type-data}
+spe_hpc <- STexampleData::SlideSeqV2_mouseHPC()
+spe_hpc <- spe_hpc[, !is.na(spe_hpc$celltype)]
+
+top_types <- names(sort(table(spe_hpc$celltype), decreasing = TRUE))[1:3]
+set.seed(1)
+keep_beads <- unlist(lapply(top_types, function(ct) {
+  idx <- which(spe_hpc$celltype == ct)
+  idx[sample.int(length(idx), min(1500L, length(idx)))]
+}))
+spe_hpc <- spe_hpc[, sort(keep_beads)]
+
+# Library-size factors from all genes, before keeping only a few of them.
+lib <- MatrixGenerics::colSums(counts(spe_hpc))
+spe_hpc$sizeFactor <- lib / mean(lib)
+
+spe_hpc <- filter_features(
+  spe_hpc,
+  min_total = 50,
+  exclude_mito = TRUE,
+  group = "celltype",
+  smooth_k = 20
 )
+top_genes <- order(MatrixGenerics::rowSums(counts(spe_hpc)), decreasing = TRUE)[1:25]
+spe_hpc <- spe_hpc[top_genes, ]
+
+table(spe_hpc$celltype)
+```
+
+We fit TweedSpot twice: once ignoring cell types, and once within each cell
+type.
+
+```{r cell-type-fit}
+overall <- tweedspot(spe_hpc, smooth_k = 20, seed = 1, BPPARAM = bp,
+                     verbose = FALSE)
+by_type <- tweedspot(spe_hpc, group = "celltype", smooth_k = 20, seed = 1,
+                     BPPARAM = bp, verbose = FALSE)
+```
+
+Ignoring cell types, many genes look spatially variable. Within cell types,
+fewer remain: genes called only in the first analysis vary in space mainly
+because the cell types they mark are arranged in space.
+
+```{r cell-type-compare}
+called_overall <- rowData(overall)$tweedspot_padj < 0.05
+called_within <- rowData(by_type)$tweedspot_group_sig != ""
+table(overall = called_overall, within_cell_type = called_within)
+
+# Genes called overall but in no cell type: candidate composition effects
+rownames(spe_hpc)[called_overall & !called_within]
+
+# One row per gene and cell type
+res_ct <- get_tweedspot_results(by_type, group = TRUE)
+head(res_ct[, c("feature", "group", "n_detected", "padj", "dev_expl")])
+
+# Top hits within the most common cell type
+top_spatial_genes(by_type, n = 5, group = top_types[1])
+```
+
+`plot_feature()` and `plot_top_features()` take the same `group` argument and
+show the model fitted on that cell type's beads only.
+
+```{r cell-type-plot, fig.width=7.2, fig.height=2.9}
+best <- top_spatial_genes(by_type, n = 1, group = top_types[1])$feature
+plot_feature(by_type, best, group = top_types[1])
+```
+
+The same argument works with any discrete location label, such as cell states
+or annotated regions.
+
+# Visualize spatial patterns
+
+`plot_feature()` shows one feature in three aligned panels: the observed
+normalized signal, the TweedSpot fit on the same colour scale, and the fitted
+spatial effect as a log2 fold change relative to the feature's average. It
+refits the model with the settings `tweedspot()` stored in
+`metadata(spe_res)$tweedspot`, so the figure shows exactly the model that was
+tested.
+
+```{r plot-feature, fig.width=7.2, fig.height=2.9}
+top_feature <- rownames(res)[1]
+plot_feature(spe_res, top_feature)
+```
+
+`plot_top_features()` draws the spatial effects of the `n_top` most
+significant features on one shared scale, so the strength of different
+patterns can be compared directly.
+
+```{r plot-top, fig.width=7.2, fig.height=5}
+plot_top_features(spe_res, n_top = 6)
+```
+
+Both functions save publication-ready files when given an `output_dir`, which
+is created if needed. The default size, 7.2 inches wide, is a two-column journal
+width.
+
+```{r save-plots, eval=FALSE}
+plot_feature(spe_res, top_feature, output_dir = "figures", formats = c("pdf", "png"))
+plot_top_features(spe_res, n_top = 9, output_dir = "figures")
 ```
 
 # Notes
@@ -260,8 +371,8 @@ plot_spatial_fit(
   size adjustment. Otherwise, `size_factor_method = "scran"` estimates size
   factors with `scran::computeSumFactors()`. Users can set
   `size_factor_method = "library_size"` for total-count scaling.
-- `filter_genes()` can optionally report how many genes and spots were retained
-  and how many were removed by each criterion.
+- `filter_features()` can optionally report how many features and locations
+  were retained and how many were removed by each criterion.
 - `tweedspot()` can print lightweight progress messages through
   `verbose = TRUE`.
 

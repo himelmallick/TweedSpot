@@ -7,7 +7,8 @@
 top_spatial_genes(
   input,
   n = 10L,
-  rank_by = c("padj", "pval", "stat", "dev_expl")
+  rank_by = c("padj", "pval", "stat", "dev_expl"),
+  group = NULL
 )
 }
 \arguments{
@@ -18,6 +19,10 @@ results in \code{rowData(input)}.}
 
 \item{rank_by}{Ranking column. Options are \code{"padj"}, \code{"pval"}, \code{"stat"}, or
 \code{"dev_expl"}. Default \code{"padj"}.}
+
+\item{group}{For results of \code{tweedspot(group = ...)}: a group label (or
+several) to return the top hits within those groups, or \code{TRUE} for the top
+feature-group pairs overall. Default \code{NULL} uses the per-feature results.}
 }
 \value{
 A ranked \code{data.frame} containing the top TweedSpot hits.

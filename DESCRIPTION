@@ -1,6 +1,6 @@
 Package: TweedSpot
 Title: Self-Adaptive Spatial Tweedie Models for Spatially Variable Gene Detection
-Version: 0.99.1
+Version: 0.99.2
 Authors@R: c(
     person("Nalin", "Arora", role = c("aut", "cre"),
            email = "naa4050@med.cornell.edu",
@@ -24,6 +24,7 @@ Depends:
     R (>= 4.6.0)
 Imports:
     mgcv,
+    MatrixGenerics,
     scran,
     SpatialExperiment,
     SummarizedExperiment,
@@ -32,9 +33,14 @@ Imports:
     methods,
     stats
 Suggests:
+    SpaNorm,
     STexampleData,
     testthat (>= 3.0.0),
     ggplot2,
+    patchwork,
+    svglite,
+    Matrix,
+    DelayedArray,
     knitr,
     rmarkdown,
     BiocStyle

@@ -10,7 +10,7 @@ TweedSpot provides spatially variable gene detection for spatial omics data
 using Tweedie generalized additive models with spatial smoothing.
 }
 \details{
-The package currently exposes \code{filter_genes()} for preprocessing and
+The package currently exposes \code{filter_features()} for preprocessing and
 \code{tweedspot()} for spatially variable gene detection with Tweedie generalized
 additive models.
 }

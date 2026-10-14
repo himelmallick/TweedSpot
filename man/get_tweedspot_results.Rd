@@ -7,7 +7,8 @@
 get_tweedspot_results(
   input,
   sort_by = c("padj", "none", "pval", "stat", "dev_expl"),
-  decreasing = NULL
+  decreasing = NULL,
+  group = NULL
 )
 }
 \arguments{
@@ -20,10 +21,19 @@ results in \code{rowData(input)}.}
 \item{decreasing}{Logical; override the default sort direction for
 \code{sort_by}. If \code{NULL}, p-values sort ascending and statistics/effect-size
 columns sort descending.}
+
+\item{group}{For results of \code{tweedspot(group = ...)}: \code{NULL} (default)
+returns the usual per-feature \code{rowData()} results; \code{TRUE} returns the full
+feature-by-group table; one or more group labels return only those
+groups' rows.}
 }
 \value{
-A \code{data.frame} containing the original \code{rowData(input)} columns and
-TweedSpot result columns.
+A \code{data.frame}. Without \code{group}, the original \code{rowData(input)}
+columns and TweedSpot result columns. With \code{group}, one row per feature
+and group with columns \code{feature}, \code{group}, \code{n_locations}, \code{n_detected},
+\code{tested}, \code{reason} (why a pair was not tested), \code{stat}, \code{pval}, \code{padj},
+\code{padj_feature} (stage-wise screening p-value), \code{edf}, \code{dev_expl}, \code{p}, and
+\code{family}.
 }
 \description{
 \code{get_tweedspot_results()} pulls the TweedSpot result columns from
