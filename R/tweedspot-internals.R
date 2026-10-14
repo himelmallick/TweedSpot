@@ -624,8 +624,10 @@ tweedspot_resolve_family <- function(family, tweedie_p = NULL, Y = NULL) {
 # `mgcv::tw()` evaluates helpers such as `ldTweedie()` from an environment whose
 # parent is the global environment, so fits fail unless mgcv is attached (and
 # always fail on BiocParallel workers). Re-parent it to the mgcv namespace.
-tweedspot_tw <- function(link = "log", a = 1.01, b = 1.99) {
-  fam <- mgcv::tw(link = link, a = a, b = b)
+# The link is passed as a literal string: recent mgcv versions read the `link`
+# argument with substitute(), so a variable would be taken as the link's name.
+tweedspot_tw <- function(a = 1.01, b = 1.99) {
+  fam <- mgcv::tw(link = "log", a = a, b = b)
   env <- environment(fam$ls)
   if (!is.null(env) && identical(parent.env(env), globalenv())) {
     parent.env(env) <- asNamespace("mgcv")
