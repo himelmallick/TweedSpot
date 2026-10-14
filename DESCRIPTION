@@ -1,6 +1,6 @@
 Package: TweedSpot
 Title: Self-Adaptive Spatial Tweedie Models for Spatially Variable Gene Detection
-Version: 0.99.2
+Version: 0.99.3
 Authors@R: c(
     person("Nalin", "Arora", role = c("aut", "cre"),
            email = "naa4050@med.cornell.edu",

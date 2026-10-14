@@ -1,5 +1,15 @@
 # TweedSpot NEWS
 
+## TweedSpot 0.99.3
+
+### Bug fixes
+
+- `tweedspot()` failed with `mgcv` 1.9-4 and later ("link \"link\" not
+  available for tw family") because the Tweedie link was passed to
+  `mgcv::tw()` as a variable. The log link is now passed directly, so the
+  default Tweedie model, the examples, and the vignette run on current `mgcv`.
+  Results are unchanged.
+
 ## TweedSpot 0.99.2
 
 ### New features
@@ -42,8 +52,6 @@
   started from the previous feature's estimate and could get stuck at the
   lower bound, inflating false positives. Results from earlier versions with
   `family = "tw"` should be recomputed.
-- `tweedspot()` failed with `mgcv` 1.9-4 and later ("link \"link\" not
-  available for tw family") because the Tweedie link was passed as a variable.
 - Stage-wise group adjustment now controls the false discovery rate at its
   target level.
 - Results from an earlier `tweedspot()` run are cleared before each new run,
